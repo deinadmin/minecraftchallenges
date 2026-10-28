@@ -1,0 +1,50 @@
+lobby:
+  configured: false
+  world: lobby
+  x: 0.5
+  y: 80.0
+  z: 0.5
+  yaw: 0.0
+  pitch: 0.0
+
+jump-n-run:
+  platform-material: LIGHT_BLUE_CONCRETE
+  start-height: 8
+  cleanup-radius: 16.0
+  triggers: []
+  high-scores: {}
+  spawn:
+    configured: false
+
+challenge:
+  world-name: challenge_mob_hunt
+  waiting-world-border-radius: 40.0
+  seed: 0
+  duration-seconds: 300
+  crafting-randomizer:
+    duration-seconds: 300
+  block-randomizer:
+    duration-seconds: 0
+  sponge-world:
+    duration-seconds: 0
+
+smp:
+  world-name: smp
+  max-players: 50
+  difficulty: NORMAL
+  spawn-protection-radius: 150
+  # Spielerstände werden zusätzlich bei jedem Verlassen, Ausloggen und Herunterfahren gespeichert.
+  autosave-seconds: 30
+  # Wartezeit für /home und /spawn. Bewegung oder Schaden bricht den Teleport ab.
+  home-warmup-seconds: 3
+  economy:
+    starting-balance: 100
+    currency: Coins
+  backups:
+    # relativ zum Serverordner
+    folder: backups/smp
+    daily-enabled: true
+    daily-time: "04:00"
+    keep-daily: 14
+    keep-manual: 30
+    keep-pre-restore: 5

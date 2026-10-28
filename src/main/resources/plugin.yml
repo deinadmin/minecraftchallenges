@@ -1,0 +1,128 @@
+name: MinecraftChallenges
+version: '${version}'
+main: de.carl.minecraftchallenges.MinecraftChallengesPlugin
+description: Lobby und erweiterbares Challenge-System für einen Paper-Server
+author: Carl
+api-version: '26.3'
+commands:
+  challenge:
+    description: Verwaltung der Challenges
+    usage: /challenge <menu|stop|setlobby|reload>
+  lobby:
+    description: Teleportiert dich zurück in die Lobby
+    usage: /lobby
+    aliases: [hub, l]
+  edit:
+    description: Schaltet den Lobby-Bearbeitungsmodus um
+    usage: /edit
+  jumpnrun:
+    description: Verwaltet die Jump'n'Run-Druckplatten in der Lobby
+    usage: /jumpnrun <trigger set|list|reset | spawn set|remove>
+  help:
+    description: Zeigt alle Befehle
+    usage: /help
+    aliases: ['?']
+  sethome:
+    description: Setzt dein SMP-Zuhause
+    usage: /sethome
+  home:
+    description: Teleportiert dich zu deinem SMP-Zuhause
+    usage: /home
+  pay:
+    description: Überweist einem Spieler Geld
+    usage: /pay <Spieler> <Betrag>
+  money:
+    description: Zeigt einen Kontostand
+    usage: /money [Spieler]
+    aliases: [balance, bal]
+  eco:
+    description: Verwaltet SMP-Kontostände
+    usage: /eco <give|take|set> <Spieler> <Betrag>
+    permission: minecraftchallenges.command.eco
+  shop:
+    description: Öffnet den SMP-Shop
+    usage: /shop [edit]
+  setspawn:
+    description: Setzt den SMP-Spawn samt Spawnschutz
+    usage: /setspawn
+    permission: minecraftchallenges.command.smp-setspawn
+  spawn:
+    description: Teleportiert dich nach kurzer Wartezeit zum SMP-Spawn
+    usage: /spawn
+  ec:
+    description: Öffnet deine SMP-Endertruhe (Admins auch die anderer Spieler)
+    usage: /ec [Spieler]
+    aliases: [enderchest]
+  backup:
+    description: Verwaltet SMP-Backups
+    usage: /backup <create [Name]|list|restore <Name>|delete <Name>>
+    permission: minecraftchallenges.command.backup
+permissions:
+  minecraftchallenges.rank.admin:
+    description: Vollständiger MinecraftChallenges-Administratorrang
+    default: op
+    children:
+      minecraftchallenges.challenge.manage: true
+      minecraftchallenges.command.edit: true
+      minecraftchallenges.command.jumpnrun: true
+      minecraftchallenges.command.setlobby: true
+      minecraftchallenges.command.reload: true
+      minecraftchallenges.command.backup: true
+      minecraftchallenges.command.eco: true
+      minecraftchallenges.command.shop: true
+      minecraftchallenges.command.smp-setspawn: true
+      minecraftchallenges.command.ec-others: true
+      minecraftchallenges.command.challenge-menu: true
+      minecraftchallenges.command.lobby: true
+      minecraftchallenges.challenge.ready: true
+  minecraftchallenges.rank.mod:
+    description: Moderatorrang für die Challenge-Verwaltung
+    default: false
+    children:
+      minecraftchallenges.challenge.manage: true
+      minecraftchallenges.command.challenge-menu: true
+      minecraftchallenges.command.lobby: true
+  minecraftchallenges.challenge.manage:
+    description: Darf Challenge-Menü, Zeit, Regeneration und Force-Start verwalten
+    default: false
+  minecraftchallenges.command.edit:
+    description: Darf die Lobby bearbeiten
+    default: false
+  minecraftchallenges.command.jumpnrun:
+    description: Darf Jump'n'Run-Trigger und Spawn verwalten
+    default: false
+  minecraftchallenges.command.setlobby:
+    description: Darf den Lobby-Spawn setzen
+    default: false
+  minecraftchallenges.command.reload:
+    description: Darf die Plugin-Konfiguration neu laden
+    default: false
+  minecraftchallenges.command.backup:
+    description: Darf SMP-Backups erstellen, wiederherstellen und löschen
+    default: false
+  minecraftchallenges.command.eco:
+    description: Darf SMP-Kontostände verändern
+    default: false
+  minecraftchallenges.command.shop:
+    description: Darf den SMP-Shop bearbeiten
+    default: false
+  minecraftchallenges.command.smp-setspawn:
+    description: Darf den SMP-Spawn setzen
+    default: false
+  minecraftchallenges.command.ec-others:
+    description: Darf die SMP-Endertruhen anderer Spieler öffnen und bearbeiten
+    default: false
+  minecraftchallenges.command.challenge-menu:
+    description: Darf das Navigations- und Challenge-Menü öffnen
+    default: true
+  minecraftchallenges.command.lobby:
+    description: Darf sich in die Lobby teleportieren
+    default: true
+  minecraftchallenges.challenge.ready:
+    description: Darf sich ohne Teamrang für eine Challenge bereitmachen
+    default: true
+  minecraftchallenges.admin:
+    description: Veralteter Alias für den Administratorrang
+    default: false
+    children:
+      minecraftchallenges.rank.admin: true
