@@ -70,9 +70,9 @@ public final class Messages {
         recipient.sendMessage(message(topicFor(recipient), type, content));
     }
 
-    /** For messages that are not tied to a place, such as permission or usage errors. */
+    /** Permission and usage errors follow the player context, or System for the console. */
     public static void sendSystem(CommandSender recipient, Type type, String text) {
-        recipient.sendMessage(system(type, text));
+        recipient.sendMessage(message(topicFor(recipient), type, text));
     }
 
     public static Component system(Type type, String text) {

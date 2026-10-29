@@ -71,7 +71,7 @@ public final class HelpCommand implements CommandExecutor, Listener {
         }
         boolean hub = lobby.isLobbyWorld(player.getWorld());
         boolean challenge = registry.instance(player.getWorld()) != null;
-        page(sender, "Lobby Commands", lobbyEntries(sender, hub, challenge));
+        page(sender, challenge ? "Challenge Commands" : "Lobby Commands", lobbyEntries(sender, hub, challenge));
     }
 
     private List<Entry> lobbyEntries(CommandSender sender, boolean hub, boolean challenge) {

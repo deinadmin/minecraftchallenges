@@ -12,6 +12,7 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:26.3.build.+")
+    compileOnly("io.netty:netty-transport:4.2.16.Final")
 }
 
 java {
@@ -71,3 +72,13 @@ val npcPolicyTest = tasks.register<JavaExec>("npcPolicyTest") {
     javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
 }
 tasks.check { dependsOn(npcPolicyTest) }
+
+val chatFormatTest = tasks.register<JavaExec>("chatFormatTest") {
+    group = "verification"
+    description = "Checks chat prefixes, duplicate prevention, ranks and component preservation."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.chat.ChatFormatTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(chatFormatTest) }

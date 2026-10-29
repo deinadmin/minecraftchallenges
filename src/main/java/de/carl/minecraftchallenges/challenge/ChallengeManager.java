@@ -702,8 +702,8 @@ public final class ChallengeManager implements GameInstance {
         if (targets.get(killer.getUniqueId()) != killedType) return;
 
         points.merge(killer.getUniqueId(), 1, Integer::sum);
-        Messages.send(killer, Messages.Type.SUCCESS,
-                "+1 Punkt für " + targetName(killedType) + "!");
+        String announcement = killer.getName() + " hat einen Punkt bekommen für " + targetName(killedType) + "!";
+        challengePlayers().forEach(player -> Messages.send(player, Messages.Type.SUCCESS, announcement));
         assignNewTarget(killer, true);
         updateScoreboard();
     }

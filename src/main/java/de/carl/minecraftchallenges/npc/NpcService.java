@@ -60,8 +60,11 @@ public final class NpcService implements Listener, CommandExecutor {
     private record Definition(UUID id, Location location, String skin, String action, String command) {
         String title() { return actionName(action); }
     }
-    private record Actors(Mannequin body, TextDisplay title, TextDisplay hint) {
-        void remove() { body.remove(); title.remove(); hint.remove(); }
+    private record Actors(Mannequin body, TextDisplay title, TextDisplay hint, TextDisplay rejoinHint) {
+        void remove() {
+            body.remove(); title.remove(); hint.remove();
+            if (rejoinHint != null) rejoinHint.remove();
+        }
     }
     private static final class Menu implements InventoryHolder {
         final Location placement;
@@ -315,7 +318,7 @@ public final class NpcService implements Listener, CommandExecutor {
             case "COMMAND" -> { player.closeInventory(); player.performCommand(def.command.replace("{player}", player.getName())); }
             default -> {
                 GameType type = GameType.valueOf(def.action);
-                var target = quick ? QuickJoin.select(registry.lobbies(type)) : null;
+                var target = quick ? QuickJoin.select(registry.lobbies(type), player) : null;
                 if (target != null) { player.closeInventory(); registry.join(player, target); }
                 else if (type == GameType.CUSTOM) customMenu.openList(player);
                 else lobbyMenu.open(player, type);
@@ -332,7 +335,8 @@ public final class NpcService implements Listener, CommandExecutor {
     private void tick() {
         if (ticks++ % 20 == 0) for (Definition def : definitions.values()) {
             Actors set = actors.get(def.id);
-            if (set == null || !set.body.isValid() || !set.title.isValid() || !set.hint.isValid()) {
+            if (set == null || !set.body.isValid() || !set.title.isValid() || !set.hint.isValid()
+                    || set.rejoinHint != null && !set.rejoinHint.isValid()) {
                 if (set != null) set.remove();
                 spawn(def); set = actors.get(def.id);
             }
@@ -343,6 +347,20 @@ public final class NpcService implements Listener, CommandExecutor {
                     : def.action.equals("JUMP_AND_RUN") || def.action.equals("SMP") ? "Klicken oder Berühren"
                     : "Klicken oder Berühren: Lobby-Menü", NamedTextColor.GRAY);
             if (!hint.equals(set.hint.text())) set.hint.text(hint);
+            if (set.rejoinHint != null) {
+                // Only returning participants see Quick Join when no public custom slot is joinable.
+                boolean publicJoin = hasQuickJoin(def);
+                for (Player viewer : Bukkit.getOnlinePlayers()) {
+                    boolean returning = !publicJoin && QuickJoin.select(registry.lobbies(GameType.CUSTOM), viewer) != null;
+                    if (returning) {
+                        viewer.hideEntity(plugin, set.hint);
+                        viewer.showEntity(plugin, set.rejoinHint);
+                    } else {
+                        viewer.showEntity(plugin, set.hint);
+                        viewer.hideEntity(plugin, set.rejoinHint);
+                    }
+                }
+            }
         }
         for (Player player : Bukkit.getOnlinePlayers()) {
             Set<UUID> previous = touching.getOrDefault(player.getUniqueId(), Set.of());
@@ -390,7 +408,13 @@ public final class NpcService implements Listener, CommandExecutor {
         TextDisplay title = text(def, 2.55, 1.0f);
         title.text(Component.text(def.title(), NamedTextColor.GOLD));
         TextDisplay hint = text(def, 2.23, .65f);
-        actors.put(def.id, new Actors(body, title, hint));
+        TextDisplay rejoinHint = null;
+        if (def.action.equals(GameType.CUSTOM.name())) {
+            rejoinHint = text(def, 2.23, .65f);
+            rejoinHint.setVisibleByDefault(false);
+            rejoinHint.text(Component.text("Linksklick: Quick Join · Rechtsklick: Lobby-Menü", NamedTextColor.GRAY));
+        }
+        actors.put(def.id, new Actors(body, title, hint, rejoinHint));
     }
 
     private TextDisplay text(Definition def, double height, float scale) {

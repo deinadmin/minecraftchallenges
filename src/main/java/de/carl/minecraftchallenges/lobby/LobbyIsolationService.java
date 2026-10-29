@@ -115,7 +115,7 @@ public final class LobbyIsolationService implements Listener {
         Component vanillaMessage = event.joinMessage();
         if (vanillaMessage == null) return;
         event.joinMessage(null);
-        Component message = Messages.system(Messages.Type.INFO, vanillaMessage.color(null));
+        Component message = Messages.lobby(Messages.Type.INFO, vanillaMessage.color(null));
         // Every joining player is moved to the hub, so the hub is the audience for the join message.
         plugin.getServer().getOnlinePlayers().stream()
                 .filter(player -> player.equals(event.getPlayer())
@@ -129,7 +129,7 @@ public final class LobbyIsolationService implements Listener {
         Component vanillaMessage = event.quitMessage();
         if (vanillaMessage != null) {
             event.quitMessage(null);
-            Component message = Messages.system(Messages.Type.INFO, vanillaMessage.color(null));
+            Component message = asPluginMessage(event.getPlayer(), vanillaMessage.color(null));
             sameContext(event.getPlayer()).stream()
                     .filter(player -> !player.equals(event.getPlayer()))
                     .forEach(player -> player.sendMessage(message));
@@ -176,6 +176,6 @@ public final class LobbyIsolationService implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onUnknownCommand(UnknownCommandEvent event) {
         Component message = event.message();
-        if (message != null) event.message(Messages.system(Messages.Type.ERROR, message));
+        if (message != null) event.message(Messages.message(Messages.topicFor(event.getSender()), Messages.Type.ERROR, message));
     }
 }

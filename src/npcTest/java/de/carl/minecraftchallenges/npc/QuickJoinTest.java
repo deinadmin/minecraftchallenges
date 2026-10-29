@@ -6,6 +6,7 @@ import de.carl.minecraftchallenges.lobby.GameType;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import java.util.List;
+import java.lang.reflect.Proxy;
 import java.util.Set;
 import java.util.UUID;
 
@@ -31,7 +32,23 @@ public final class QuickJoinTest {
         expect(custom, List.of(closed, custom), "Join populated open custom slot");
         expect(null, List.of(closed, new Fake(GameType.CUSTOM, 2, 8, 8, ChallengeState.WAITING)),
                 "Full custom slots disable Quick Join");
-        System.out.println("10 NPC Quick Join regression checks passed.");
+        Player player = (Player) Proxy.newProxyInstance(Player.class.getClassLoader(), new Class<?>[] {Player.class},
+                (proxy, method, values) -> { throw new AssertionError("Unexpected player access: " + method); });
+        var running = new Fake(null, 3, 8, 8, ChallengeState.RUNNING, true);
+        expect(running, List.of(populated, empty, running), player, "Own running round takes priority even when full");
+        var countdown = new Fake(null, 2, 2, 8, ChallengeState.COUNTDOWN, true);
+        expect(countdown, List.of(populated, countdown), player, "Own countdown can be rejoined");
+        expect(populated, List.of(populated, lobby(3, 4, 8, ChallengeState.RUNNING)), player,
+                "Non-participants still use public lobby selection");
+        var runningCustom = new Fake(GameType.CUSTOM, 2, 8, 8, ChallengeState.RUNNING, true);
+        expect(runningCustom, List.of(closed, runningCustom), player, "Rejoin own running custom challenge");
+        expect(null, List.of(new Fake(GameType.CUSTOM, 2, 4, 8, ChallengeState.RUNNING)), player,
+                "Other players cannot Quick Join a running custom challenge");
+        expect(empty, List.of(empty, new Fake(null, 2, 4, 8, ChallengeState.REGENERATING, true)), player,
+                "Previous membership does not allow rejoining regeneration");
+        expect(populated, List.of(populated, new Fake(null, 3, 0, 8, ChallengeState.FINISHED, true)), player,
+                "Previous membership does not prioritize a completed round");
+        System.out.println("17 NPC Quick Join regression checks passed.");
     }
 
     private static Fake lobby(int id, int players, int max, ChallengeState state) {
@@ -40,11 +57,17 @@ public final class QuickJoinTest {
     private static void expect(GameInstance expected, List<GameInstance> lobbies, String message) {
         if (QuickJoin.select(lobbies) != expected) throw new AssertionError(message);
     }
+    private static void expect(GameInstance expected, List<GameInstance> lobbies, Player player, String message) {
+        if (QuickJoin.select(lobbies, player) != expected) throw new AssertionError(message);
+    }
     private record Fake(GameType gameType, int lobbyId, int onlineParticipantCount, int maxPlayers,
-                        ChallengeState state) implements GameInstance {
+                        ChallengeState state, boolean participant) implements GameInstance {
+        Fake(GameType type, int id, int players, int max, ChallengeState state) {
+            this(type, id, players, max, state, false);
+        }
         @Override public boolean isRoundActive() { return state == ChallengeState.RUNNING || state == ChallengeState.COUNTDOWN; }
         @Override public Set<String> worldNames() { return Set.of(); }
-        @Override public boolean isParticipant(Player player) { return false; }
+        @Override public boolean isParticipant(Player player) { return participant; }
         @Override public List<Player> presentPlayers() { return List.of(); }
         @Override public String durationName() { return "Test"; }
         @Override public void select(Player player) { throw new AssertionError("Selection must not join"); }

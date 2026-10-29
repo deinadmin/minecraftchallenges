@@ -482,8 +482,8 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         if (targets.get(player.getUniqueId()) != material) return;
         scores.merge(player.getUniqueId(), 1, Integer::sum);
         updateScoreboard();
-        Messages.send(player, Messages.Type.SUCCESS,
-                "+1 Punkt für " + pretty(material) + "!");
+        broadcast(player.getName() + " hat einen Punkt bekommen für " + pretty(material) + "!",
+                Messages.Type.SUCCESS);
         assignTarget(player);
     }
 

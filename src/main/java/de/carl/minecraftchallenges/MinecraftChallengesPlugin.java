@@ -18,6 +18,7 @@ import de.carl.minecraftchallenges.menu.AdminMenu;
 import de.carl.minecraftchallenges.menu.LobbyMenu;
 import de.carl.minecraftchallenges.rank.RankService;
 import de.carl.minecraftchallenges.npc.NpcService;
+import de.carl.minecraftchallenges.chat.VanillaChatService;
 import de.carl.minecraftchallenges.randomizer.RandomizerChallenge;
 import de.carl.minecraftchallenges.randomizer.RandomizerChallengeListener;
 import de.carl.minecraftchallenges.randomizer.RandomizerType;
@@ -48,6 +49,7 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
     private BackupService backups;
     private ShopMenu shopMenu;
     private NpcService npcs;
+    private VanillaChatService vanillaChat;
 
     @Override
     public void onEnable() {
@@ -102,6 +104,8 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
             backups = null;
             shopMenu = null;
         }
+
+        vanillaChat = new VanillaChatService(this);
 
         jumpAndRunService = new JumpAndRunService(this, lobbyService);
         ChallengeMenu challengeMenu = new ChallengeMenu(lobbies, jumpAndRunService, smp);
@@ -215,6 +219,7 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (vanillaChat != null) vanillaChat.shutdown();
         if (npcs != null) npcs.shutdown();
         if (backups != null) backups.shutdown();
         if (smp != null) smp.shutdown();

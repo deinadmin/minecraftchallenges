@@ -3,6 +3,7 @@ package de.carl.minecraftchallenges.npc;
 import de.carl.minecraftchallenges.challenge.ChallengeState;
 import de.carl.minecraftchallenges.lobby.GameType;
 import de.carl.minecraftchallenges.lobby.GameInstance;
+import org.bukkit.entity.Player;
 
 import java.util.Comparator;
 import java.util.List;
@@ -10,6 +11,17 @@ import java.util.List;
 /** Never starts a spectator session or allocates an unused custom challenge slot. */
 public final class QuickJoin {
     private QuickJoin() { }
+
+    public static GameInstance select(List<GameInstance> lobbies, Player player) {
+        if (player != null) {
+            GameInstance returning = lobbies.stream()
+                    .filter(GameInstance::isRoundActive)
+                    .filter(instance -> instance.isParticipant(player))
+                    .min(Comparator.comparingInt(GameInstance::lobbyId)).orElse(null);
+            if (returning != null) return returning;
+        }
+        return select(lobbies);
+    }
 
     public static GameInstance select(List<GameInstance> lobbies) {
         return lobbies.stream()

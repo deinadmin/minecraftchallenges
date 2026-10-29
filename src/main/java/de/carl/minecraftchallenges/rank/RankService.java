@@ -61,12 +61,12 @@ public final class RankService implements Listener {
         player.playerListName(chatName(player));
     }
 
-    private Component chatName(Player player) {
-        if (isAdmin(player)) {
+    public static Component chatName(Player player) {
+        if (player.hasPermission(ADMIN)) {
             return Component.text("Admin | " + player.getName(), NamedTextColor.RED,
                     TextDecoration.BOLD);
         }
-        if (isModerator(player)) {
+        if (player.hasPermission(MODERATOR)) {
             return Component.text("Mod | " + player.getName(), NamedTextColor.GREEN,
                     TextDecoration.BOLD);
         }

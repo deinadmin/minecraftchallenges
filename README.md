@@ -118,10 +118,12 @@ Die Daten bleiben in `plugins/MinecraftChallenges/npcs.yml` über Neustarts erha
 Es wird kein zusätzliches NPC-Plugin benötigt.
 
 - Challenge-NPCs: Linksklick und Berühren versuchen Quick Join; Rechtsklick öffnet die bekannte Lobby-Auswahl.
-- Quick Join bevorzugt die beitretbare Lobby mit den meisten Spielern, bei Gleichstand die niedrigste Lobby-Nummer.
+- Quick Join bringt bisherige Teilnehmer zuerst in ihre noch laufende Runde (auch während des Countdowns) zurück.
+  Dabei gilt die normale Wiederbeitrittslogik, auch bei einer vollen Lobby. Ansonsten bevorzugt Quick Join die beitretbare Lobby mit den meisten Spielern, bei Gleichstand die niedrigste Lobby-Nummer.
   Volle Lobbys, laufende Runden, Countdowns und regenerierende Welten werden übersprungen.
   Gibt es keine passende Lobby, öffnet sich die Lobby-Auswahl.
 - Eigene Challenges: Quick Join berücksichtigt nur bereits erstellte, beitretbare Challenges.
+  Wer einer eigenen laufenden Runde wieder beitreten kann, sieht ebenfalls den Quick-Join-Hinweis.
   Ohne passende Challenge entfällt der Quick-Join-Hinweis; alle Interaktionen öffnen die Liste zum Beitreten oder Erstellen.
 - Jump'n'Run und SMP nutzen dieselben Ziele und Zugangsregeln wie der Navigator.
 - Befehle werden bei Rechtsklick oder Berühren als interagierender Spieler mit dessen Rechten ausgeführt.
@@ -137,6 +139,20 @@ Diese Prüfungen laufen auch bei `./gradlew build`.
 - `minecraftchallenges.rank.admin` ist standardmäßig für Operatoren aktiv und umfasst sämtliche Verwaltungsrechte.
 - `minecraftchallenges.rank.mod` umfasst ausschließlich `minecraftchallenges.challenge.manage` für Start, Stop, Zeit und Weltregeneration.
 - Normale Spieler besitzen standardmäßig Menü-, Lobby- und Ready-Up-Rechte.
+
+## Chat-Format
+
+Spielernachrichten verwenden den Rang und Namen als Präfix. Servermeldungen und Vanilla-Befehlsausgaben
+verwenden je nach Empfänger `Lobby »`, `SMP »` oder `Challenge »`; die Konsole verwendet bei
+Plugin-Meldungen `System »`. Vanilla-Ankündigungen bekannter Spieler verwenden ebenfalls deren Rang.
+Bereits formatierte Nachrichten werden nicht doppelt präfixiert. Übersetzungen, Farben sowie klickbare
+und Hover-Texte bleiben erhalten; Actionbars werden nicht als Chat formatiert.
+Die Hilfe heißt innerhalb einer Challenge **Challenge Commands**, in der Lobby **Lobby Commands**
+und im SMP **SMP Commands**.
+
+Die Ausgabe-Anpassung ist auf die Mojang-benannten Chat-Pakete von Paper 26.3 abgestimmt und benötigt
+kein zusätzliches Plugin. Netty wird nur zum Kompilieren eingebunden und zur Laufzeit vom Server bereitgestellt.
+`./gradlew chatFormatTest` prüft das Komponentenformat; diese Prüfungen laufen ebenfalls beim Build.
 
 ## Konfiguration
 
