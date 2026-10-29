@@ -92,3 +92,13 @@ val npcLookTest = tasks.register<JavaExec>("npcLookTest") {
     javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
 }
 tasks.check { dependsOn(npcLookTest) }
+
+val challengeHudTest = tasks.register<JavaExec>("challengeHudTest") {
+    group = "verification"
+    description = "Checks per-player challenge HUD visibility and updates across round changes."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.challenge.ChallengeHudTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(challengeHudTest) }

@@ -61,17 +61,17 @@ public final class HelpCommand implements CommandExecutor, Listener {
 
     private void send(CommandSender sender) {
         if (!(sender instanceof Player player)) {
-            page(sender, "Lobby Commands", lobbyEntries(sender, true, true));
-            if (smp != null) page(sender, "SMP Commands", smpEntries(sender, false));
+            page(sender, "Lobby-Befehle", lobbyEntries(sender, true, true));
+            if (smp != null) page(sender, "SMP-Befehle", smpEntries(sender, false));
             return;
         }
         if (smp != null && smp.isSmpWorld(player.getWorld())) {
-            page(sender, "SMP Commands", smpEntries(sender, smp.isEditing(player)));
+            page(sender, "SMP-Befehle", smpEntries(sender, smp.isEditing(player)));
             return;
         }
         boolean hub = lobby.isLobbyWorld(player.getWorld());
         boolean challenge = registry.instance(player.getWorld()) != null;
-        page(sender, challenge ? "Challenge Commands" : "Lobby Commands", lobbyEntries(sender, hub, challenge));
+        page(sender, challenge ? "Challenge-Befehle" : "Lobby-Befehle", lobbyEntries(sender, hub, challenge));
     }
 
     private List<Entry> lobbyEntries(CommandSender sender, boolean hub, boolean challenge) {
@@ -92,6 +92,8 @@ public final class HelpCommand implements CommandExecutor, Listener {
                     "/challenge setlobby", "Setzt den Lobby-Spawn");
         }
         if (challenge) {
+            add(entries, sender, true, null, false,
+                    "/togglechallengehud", "Blendet Scoreboard, Bossbar und Hotbar-Infos ein oder aus");
             add(entries, sender, false, RankService.MANAGE_CHALLENGE, true,
                     "/challenge stop", sender instanceof Player
                             ? "Beendet die laufende Challenge in dieser Lobby"

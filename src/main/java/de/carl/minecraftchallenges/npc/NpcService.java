@@ -3,6 +3,8 @@ package de.carl.minecraftchallenges.npc;
 import de.carl.minecraftchallenges.MinecraftChallengesPlugin;
 import de.carl.minecraftchallenges.custom.CustomChallengeMenu;
 import de.carl.minecraftchallenges.lobby.GameLobbyRegistry;
+import de.carl.minecraftchallenges.lobby.GameInstance;
+import de.carl.minecraftchallenges.smp.SmpService;
 import de.carl.minecraftchallenges.lobby.GameType;
 import de.carl.minecraftchallenges.menu.ChallengeMenu;
 import de.carl.minecraftchallenges.menu.LobbyMenu;
@@ -46,6 +48,7 @@ public final class NpcService implements Listener, CommandExecutor {
     private final ChallengeMenu navigator;
     private final LobbyMenu lobbyMenu;
     private final CustomChallengeMenu customMenu;
+    private final SmpService smp;
     private final NamespacedKey entityKey;
     private final Map<UUID, Definition> definitions = new LinkedHashMap<>();
     private final Map<UUID, Actors> actors = new HashMap<>();
@@ -62,9 +65,10 @@ public final class NpcService implements Listener, CommandExecutor {
     private record Definition(UUID id, Location location, String skin, String action, String command) {
         String title() { return actionName(action); }
     }
-    private record Actors(Mannequin body, TextDisplay title, TextDisplay hint, TextDisplay rejoinHint) {
+    private record Actors(Mannequin body, TextDisplay title, TextDisplay hint, TextDisplay rejoinHint,
+                          TextDisplay population) {
         void remove() {
-            body.remove(); title.remove(); hint.remove();
+            body.remove(); title.remove(); hint.remove(); population.remove();
             if (rejoinHint != null) rejoinHint.remove();
         }
     }
@@ -82,9 +86,10 @@ public final class NpcService implements Listener, CommandExecutor {
     }
 
     public NpcService(MinecraftChallengesPlugin plugin, LobbyService lobby, GameLobbyRegistry registry,
-                      ChallengeMenu navigator, LobbyMenu lobbyMenu, CustomChallengeMenu customMenu) {
+                      ChallengeMenu navigator, LobbyMenu lobbyMenu, CustomChallengeMenu customMenu, SmpService smp) {
         this.plugin = plugin; this.lobby = lobby; this.registry = registry;
         this.navigator = navigator; this.lobbyMenu = lobbyMenu; this.customMenu = customMenu;
+        this.smp = smp;
         entityKey = new NamespacedKey(plugin, "lobby_npc");
         file = plugin.getDataFolder().toPath().resolve("npcs.yml");
         try { lookPackets = new NpcLookPackets(); }
@@ -184,7 +189,7 @@ public final class NpcService implements Listener, CommandExecutor {
         Definition previous = definitions.get(editing);
         String skin = previous == null ? player.getName() : previous.skin;
         List<DialogInput> inputs = new ArrayList<>(List.of(
-                DialogInput.text("skin", 300, Component.text("Skin · Minecraft-Username"), true, skin, 16, null)));
+                DialogInput.text("skin", 300, Component.text("Skin · Minecraft-Benutzername"), true, skin, 16, null)));
         if (action.equals("COMMAND")) inputs.add(DialogInput.text("command", 300,
                 Component.text("Befehl als Spieler · {player} möglich"), true,
                 previous == null ? "" : previous.command, 256, null));
@@ -206,7 +211,7 @@ public final class NpcService implements Listener, CommandExecutor {
                                 if (!newSkin.matches("[A-Za-z0-9_]{1,16}")
                                         || action.equals("COMMAND") && (newCommand.isBlank()
                                         || newCommand.chars().anyMatch(Character::isISOControl))) {
-                                    Messages.send(player, Messages.Type.ERROR, "Bitte gültigen Skin-Username und gegebenenfalls Befehl eingeben.");
+                                    Messages.send(player, Messages.Type.ERROR, "Bitte gültigen Skin-Benutzername und gegebenenfalls Befehl eingeben.");
                                     configure(player, placement, editing, action); return;
                                 }
                                 Definition def = new Definition(editing == null ? UUID.randomUUID() : editing,
@@ -332,21 +337,40 @@ public final class NpcService implements Listener, CommandExecutor {
         }
     }
 
+    private GameInstance quickJoinTarget(Definition def) {
+        if (def.action.equals("COMMAND") || def.action.equals("SMP") || def.action.equals("JUMP_AND_RUN")) return null;
+        return QuickJoin.select(registry.lobbies(GameType.valueOf(def.action)));
+    }
+
     private boolean hasQuickJoin(Definition def) {
-        if (def.action.equals("COMMAND") || def.action.equals("SMP") || def.action.equals("JUMP_AND_RUN")) return false;
-        GameType type = GameType.valueOf(def.action);
-        return type != GameType.CUSTOM || QuickJoin.select(registry.lobbies(type)) != null;
+        return quickJoinTarget(def) != null;
+    }
+
+    private Component populationText(Definition def) {
+        if (def.action.equals("SMP")) {
+            return smp == null ? Component.empty() : population(smp.playerCount(), smp.maxPlayers());
+        }
+        GameInstance target = quickJoinTarget(def);
+        if (target != null) return population(target.onlineParticipantCount(), target.maxPlayers());
+        return Component.empty();
+    }
+
+    private static Component population(int players, int capacity) {
+        return Component.text("● " + players + "/" + capacity, NamedTextColor.GREEN);
     }
 
     private void tick() {
         if (ticks++ % 20 == 0) for (Definition def : definitions.values()) {
             Actors set = actors.get(def.id);
             if (set == null || !set.body.isValid() || !set.title.isValid() || !set.hint.isValid()
+                    || !set.population.isValid()
                     || set.rejoinHint != null && !set.rejoinHint.isValid()) {
                 if (set != null) set.remove();
                 spawn(def); set = actors.get(def.id);
             }
             if (set == null) continue;
+            Component population = populationText(def);
+            if (!population.equals(set.population.text())) set.population.text(population);
             Component hint = Component.text(hasQuickJoin(def)
                     ? "Linksklick: Quick Join · Rechtsklick: Lobby-Menü"
                     : def.action.equals("COMMAND") ? "Rechtsklick oder Berühren"
@@ -443,7 +467,9 @@ public final class NpcService implements Listener, CommandExecutor {
             rejoinHint.setVisibleByDefault(false);
             rejoinHint.text(Component.text("Linksklick: Quick Join · Rechtsklick: Lobby-Menü", NamedTextColor.GRAY));
         }
-        actors.put(def.id, new Actors(body, title, hint, rejoinHint));
+        TextDisplay population = text(def, 2.90, .65f);
+        population.text(populationText(def));
+        actors.put(def.id, new Actors(body, title, hint, rejoinHint, population));
     }
 
     private TextDisplay text(Definition def, double height, float scale) {

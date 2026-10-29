@@ -5,10 +5,10 @@ import org.bukkit.Material;
 public enum GameType {
     MOB_HUNT("mob-hunt", "Mob-Jagd", Material.IRON_SWORD,
             "Zufällige Mobs gegen die Zeit jagen"),
-    CRAFTING("crafting-randomizer", "Crafting-Randomizer", Material.CRAFTING_TABLE,
+    CRAFTING("crafting-randomizer", "Rezept-Zufallsgenerator", Material.CRAFTING_TABLE,
             "Feste zufällige Rezepte entschlüsseln"),
-    BLOCK_DROP("block-randomizer", "Block-Randomizer", Material.DIAMOND_PICKAXE,
-            "Minecraft mit zufälligen Block-Drops durchspielen"),
+    BLOCK_DROP("block-randomizer", "Block-Zufallsgenerator", Material.DIAMOND_PICKAXE,
+            "Minecraft mit zufälligen Block-Funden durchspielen"),
     SPONGE("sponge-world", "Schwammwelt", Material.SPONGE,
             "Minecraft durchspielen – Gras und Erde sind Schwämme"),
     CUSTOM("custom", "Eigene Challenges", Material.WRITABLE_BOOK,

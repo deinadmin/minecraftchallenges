@@ -120,8 +120,8 @@ public final class JumpAndRunService {
         session.next = next;
         reserve(player, next);
         Location destination = first.center(player.getWorld()).add(0, 1.0, 0);
-        destination.setYaw(player.getYaw());
-        destination.setPitch(player.getPitch());
+        destination.setDirection(next.center(player.getWorld()).toVector()
+                .subtract(destination.toVector()).setY(0));
         if (!player.teleport(destination)) {
             removeGenerated(first, player.getUniqueId());
             removeGenerated(next, player.getUniqueId());
@@ -230,10 +230,10 @@ public final class JumpAndRunService {
             plugin.saveConfig();
         }
         clear(player);
-        String result = "Run beendet – Punkte: " + score + " | Highscore: " + highScore;
+        String result = "Lauf beendet – Punkte: " + score + " | Bestleistung: " + highScore;
         Messages.send(player, 
                 newHighScore ? Messages.Type.SUCCESS : Messages.Type.INFO,
-                newHighScore ? result + " – neuer Highscore!" : result);
+                newHighScore ? result + " – neue Bestleistung!" : result);
     }
 
     public void clearAll() {

@@ -12,6 +12,9 @@ commands:
   challenge:
     description: Verwaltung der Challenges
     usage: /challenge <menu|stop|setlobby|reload>
+  togglechallengehud:
+    description: Blendet das Challenge-HUD für dich ein oder aus
+    usage: /togglechallengehud
   lobby:
     description: Teleportiert dich zurück in die Lobby
     usage: /lobby

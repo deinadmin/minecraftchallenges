@@ -4,9 +4,9 @@ import de.carl.minecraftchallenges.lobby.GameType;
 import org.bukkit.Material;
 
 public enum RandomizerType {
-    CRAFTING("Crafting-Randomizer", "crafting-randomizer", "challenge_crafting_randomizer",
+    CRAFTING("Rezept-Zufallsgenerator", "crafting-randomizer", "challenge_crafting_randomizer",
             Material.CRAFTING_TABLE, false, false),
-    BLOCK_DROP("Block-Randomizer", "block-randomizer", "challenge_block_randomizer",
+    BLOCK_DROP("Block-Zufallsgenerator", "block-randomizer", "challenge_block_randomizer",
             Material.DIAMOND_PICKAXE, true, true),
     SPONGE("Schwammwelt", "sponge-world", "challenge_sponge_world",
             Material.SPONGE, true, true);

@@ -633,6 +633,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
     }
 
     private void prepareWaitingPlayer(Player player) {
+        plugin.challengeHud().sendActionBar(player, Component.empty());
         player.closeInventory();
         player.getInventory().clear();
         resetPlayerState(player);
@@ -648,7 +649,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
     public void playerLeft(Player player, boolean fromHere) {
         UUID uuid = player.getUniqueId();
         hideBossBar(player);
-        player.sendActionBar(Component.empty());
+        plugin.challengeHud().sendActionBar(player, Component.empty());
         if (fromHere && isRunning() && participants.contains(uuid) && !dead.contains(uuid)) {
             snapshots.put(uuid, PlayerSnapshot.capture(player));
         }
@@ -960,7 +961,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
             if (!settings.has(CustomRule.SHARED_HEALTH)) player.setHealth(Math.min(next, player.getHealth() + 2.0));
         }
         if (settings.has(CustomRule.SHARED_HEALTH)) sharedHeal(2.0);
-        killer.sendActionBar(Component.text("+1 Herz", NamedTextColor.RED));
+        plugin.challengeHud().sendActionBar(killer, Component.text("+1 Herz", NamedTextColor.RED));
     }
 
     public void sharedDamage(double amount) {
@@ -1020,16 +1021,18 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
         }
         if (filled.isEmpty()) return;
         int index = filled.get(ThreadLocalRandom.current().nextInt(filled.size()));
-        String name = pretty(contents[index].getType());
+        Component name = Component.translatable(contents[index].getType().translationKey());
         player.getInventory().setItem(index, null);
-        player.sendActionBar(Component.text(name + " ist zerfallen!", NamedTextColor.DARK_RED));
+        plugin.challengeHud().sendActionBar(player, Component.text().color(NamedTextColor.DARK_RED)
+                .append(name).append(Component.text(" ist zerfallen!")).build());
     }
 
     private void applyRandomEffect(Player player) {
         PotionEffectType type = RANDOM_EFFECTS.get(ThreadLocalRandom.current().nextInt(RANDOM_EFFECTS.size()));
         int seconds = type == PotionEffectType.LEVITATION || type == PotionEffectType.POISON ? 8 : 30;
         player.addPotionEffect(new PotionEffect(type, seconds * 20, 0));
-        player.sendActionBar(Component.text("Zufallseffekt: " + pretty(type.getKey().getKey()), NamedTextColor.LIGHT_PURPLE));
+        plugin.challengeHud().sendActionBar(player, Component.text("Zufallseffekt: ", NamedTextColor.LIGHT_PURPLE)
+                .append(Component.translatable(type.translationKey())));
     }
 
     // ---------------------------------------------------------------- portals
@@ -1285,7 +1288,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
         float progress = duration == 0 ? 1.0f : Math.max(0.0f, Math.min(1.0f, remainingSeconds / (float) duration));
         BossBar bar = bossBars.computeIfAbsent(player.getUniqueId(), ignored -> {
             BossBar created = BossBar.bossBar(Component.empty(), progress, BossBar.Color.PURPLE, BossBar.Overlay.PROGRESS);
-            player.showBossBar(created);
+            plugin.challengeHud().showBossBar(player, created);
             return created;
         });
         bar.name(Component.text(settings.goal().displayName() + " • " + (duration == 0
@@ -1296,13 +1299,13 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
 
     private void hideBossBar(Player player) {
         BossBar bar = bossBars.remove(player.getUniqueId());
-        if (bar != null) player.hideBossBar(bar);
+        if (bar != null) plugin.challengeHud().hideBossBar(player, bar);
     }
 
     private void hideAllBossBars() {
         bossBars.forEach((uuid, bar) -> {
             Player player = Bukkit.getPlayer(uuid);
-            if (player != null) player.hideBossBar(bar);
+            if (player != null) plugin.challengeHud().hideBossBar(player, bar);
         });
         bossBars.clear();
     }
@@ -1314,7 +1317,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
                     Component.text("Eigene Challenge", NamedTextColor.GOLD));
             objective.setDisplaySlot(DisplaySlot.SIDEBAR);
         }
-        player.setScoreboard(scoreboard);
+        plugin.challengeHud().setScoreboard(player, scoreboard);
         updateScoreboard();
     }
 
@@ -1345,16 +1348,4 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
         displayedScoreEntries.addAll(current);
     }
 
-    private static String pretty(Material material) {
-        return pretty(material.name());
-    }
-
-    private static String pretty(String key) {
-        StringBuilder text = new StringBuilder();
-        for (String word : key.toLowerCase().split("_")) {
-            if (word.isEmpty()) continue;
-            text.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1)).append(' ');
-        }
-        return text.toString().trim();
-    }
 }

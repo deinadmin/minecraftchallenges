@@ -1,6 +1,7 @@
 package de.carl.minecraftchallenges;
 
 import de.carl.minecraftchallenges.challenge.ChallengeManager;
+import de.carl.minecraftchallenges.challenge.ChallengeHudService;
 import de.carl.minecraftchallenges.challenge.ChallengeSessionService;
 import de.carl.minecraftchallenges.custom.CustomChallenge;
 import de.carl.minecraftchallenges.custom.CustomChallengeListener;
@@ -42,6 +43,7 @@ import java.util.List;
 import java.util.logging.Level;
 
 public final class MinecraftChallengesPlugin extends JavaPlugin {
+    private ChallengeHudService challengeHud;
     private LobbyService lobbyService;
     private GameLobbyRegistry lobbies;
     private JumpAndRunService jumpAndRunService;
@@ -55,6 +57,8 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
 
+        challengeHud = new ChallengeHudService(() -> getServer().getScoreboardManager().getNewScoreboard());
+        getServer().getPluginManager().registerEvents(challengeHud, this);
         lobbyService = new LobbyService(this);
         RankService rankService = new RankService(this, lobbyService);
         ChallengeSessionService sessions = new ChallengeSessionService();
@@ -122,7 +126,7 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(customSlots, this);
         CustomChallengeMenu customMenu = new CustomChallengeMenu(this, lobbies, challengeMenu, customSlots);
         npcs = new NpcService(this, lobbyService, lobbies,
-                challengeMenu, lobbyMenu, customMenu);
+                challengeMenu, lobbyMenu, customMenu, smp);
         getServer().getPluginManager().registerEvents(npcs, this);
         PluginCommand npcCommand = getCommand("npc");
         if (npcCommand != null) npcCommand.setExecutor(npcs);
@@ -158,6 +162,11 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
         if (editCommand != null) {
             editCommand.setExecutor(new EditCommand(lobbyService, smp));
         }
+        PluginCommand hudCommand = getCommand("togglechallengehud");
+        if (hudCommand != null) {
+            hudCommand.setExecutor(new ToggleChallengeHudCommand(lobbies, challengeHud));
+            hudCommand.setTabCompleter((sender, commandName, alias, args) -> List.of());
+        }
         HelpCommand help = new HelpCommand(lobbyService, lobbies, smp);
         getServer().getPluginManager().registerEvents(help, this);
         PluginCommand helpCommand = getCommand("help");
@@ -174,6 +183,10 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
         isolation.refreshAll();
         getLogger().info("MinecraftChallenges ist bereit (" + GameLobbyRegistry.LOBBY_COUNT
                 + " Lobbys pro Spiel).");
+    }
+
+    public ChallengeHudService challengeHud() {
+        return challengeHud;
     }
 
     private CustomChallenge registerCustomSlot(RankService rankService, ChallengeSessionService sessions, int slot) {

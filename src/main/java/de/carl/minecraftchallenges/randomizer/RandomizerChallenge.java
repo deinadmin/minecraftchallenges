@@ -350,6 +350,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
     }
 
     private void prepareWaitingPlayer(Player player) {
+        plugin.challengeHud().sendActionBar(player, Component.empty());
         player.getInventory().clear();
         player.setAllowFlight(false);
         player.setFlying(false);
@@ -482,8 +483,9 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         if (targets.get(player.getUniqueId()) != material) return;
         scores.merge(player.getUniqueId(), 1, Integer::sum);
         updateScoreboard();
-        broadcast(player.getName() + " hat einen Punkt bekommen für " + pretty(material) + "!",
-                Messages.Type.SUCCESS);
+        Component message = Component.text(player.getName() + " hat einen Punkt bekommen für ")
+                .append(Component.translatable(material.translationKey())).append(Component.text("!"));
+        ownedPlayers().forEach(viewer -> Messages.send(viewer, Messages.Type.SUCCESS, message));
         assignTarget(player);
     }
 
@@ -726,7 +728,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
 
     public void playerLeft(Player player) {
         saveRunSnapshot(player);
-        player.sendActionBar(Component.empty());
+        plugin.challengeHud().sendActionBar(player, Component.empty());
         hideTimeBossBar(player);
         boolean wasReady = ready.remove(player.getUniqueId());
         if (readyCountdown && wasReady) cancelCountdown(player.getName() + " hat die Challenge verlassen.");
@@ -863,10 +865,11 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
     private void updateActionBar(Player player) {
         if (type == RandomizerType.CRAFTING) {
             Material target = targets.get(player.getUniqueId());
-            if (target != null) player.sendActionBar(Component.text("Aufgabe: " + pretty(target)
-                    + " | Punkte: " + scores.getOrDefault(player.getUniqueId(), 0), NamedTextColor.GRAY));
+            if (target != null) plugin.challengeHud().sendActionBar(player, Component.text("Aufgabe: ", NamedTextColor.GRAY)
+                    .append(Component.translatable(target.translationKey()))
+                    .append(Component.text(" | Punkte: " + scores.getOrDefault(player.getUniqueId(), 0))));
         } else {
-            player.sendActionBar(Component.text("Spielzeit: "
+            plugin.challengeHud().sendActionBar(player, Component.text("Spielzeit: "
                     + TimeFormatter.gameTime(elapsedSeconds), NamedTextColor.GRAY));
         }
     }
@@ -879,7 +882,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         BossBar bar = timeBossBars.computeIfAbsent(player.getUniqueId(), ignored -> {
             BossBar created = BossBar.bossBar(Component.empty(), progress,
                     BossBar.Color.BLUE, BossBar.Overlay.PROGRESS);
-            player.showBossBar(created);
+            plugin.challengeHud().showBossBar(player, created);
             return created;
         });
         bar.name(Component.text(duration == 0
@@ -891,13 +894,13 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
 
     private void hideTimeBossBar(Player player) {
         BossBar bar = timeBossBars.remove(player.getUniqueId());
-        if (bar != null) player.hideBossBar(bar);
+        if (bar != null) plugin.challengeHud().hideBossBar(player, bar);
     }
 
     private void hideAllTimeBossBars() {
         timeBossBars.forEach((uuid, bar) -> {
             Player player = Bukkit.getPlayer(uuid);
-            if (player != null) player.hideBossBar(bar);
+            if (player != null) plugin.challengeHud().hideBossBar(player, bar);
         });
         timeBossBars.clear();
     }
@@ -909,7 +912,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
                     Component.text(type.displayName(), NamedTextColor.GOLD));
             scoreObjective.setDisplaySlot(DisplaySlot.SIDEBAR);
         }
-        player.setScoreboard(scoreboard);
+        plugin.challengeHud().setScoreboard(player, scoreboard);
     }
 
     private void updateScoreboard() {
@@ -980,12 +983,6 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
     }
     private boolean has(ItemStack item, NamespacedKey key) {
         return item != null && item.hasItemMeta() && item.getItemMeta().getPersistentDataContainer().has(key, PersistentDataType.BYTE);
-    }
-    private String pretty(Material material) {
-        String[] words = material.name().toLowerCase().split("_");
-        StringBuilder text = new StringBuilder();
-        for (String word : words) text.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1)).append(' ');
-        return text.toString().trim();
     }
     private String durationName(int seconds) {
         ChallengeDuration fallback = type.allowsUnlimitedDuration()

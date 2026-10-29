@@ -639,7 +639,7 @@ public final class ChallengeManager implements GameInstance {
                     challengePlayers().forEach(challengePlayer -> challengePlayer.sendTitle(
                             "§6" + number[0], "§eMob-Jagd startet", 0, 25, 5));
                 } else {
-                    challengePlayers().forEach(challengePlayer -> challengePlayer.sendActionBar(
+                    challengePlayers().forEach(challengePlayer -> plugin.challengeHud().sendActionBar(challengePlayer,
                             Messages.challenge(Messages.Type.INFO,
                                     "Vorbereitung: " + (number[0] - 10) + " Sekunden")));
                 }
@@ -659,7 +659,7 @@ public final class ChallengeManager implements GameInstance {
         state = ChallengeState.WAITING;
         challengePlayers().forEach(challengePlayer -> {
             challengePlayer.sendTitle("", "", 0, 1, 0);
-            challengePlayer.sendActionBar(Component.empty());
+            plugin.challengeHud().sendActionBar(challengePlayer, Component.empty());
             Messages.send(challengePlayer, Messages.Type.INFO,
                     "Der Start wurde abgebrochen, weil " + player.getName() + " nicht mehr bereit ist.");
             giveWaitingItems(challengePlayer);
@@ -726,14 +726,14 @@ public final class ChallengeManager implements GameInstance {
         if (!isRunning() || !isParticipant(player)) return;
         int remaining = skips.getOrDefault(player.getUniqueId(), 0);
         if (remaining <= 0) {
-            Messages.send(player, Messages.Type.ERROR, "Du hast keine Skips mehr.");
+            Messages.send(player, Messages.Type.ERROR, "Du kannst kein Ziel mehr überspringen.");
             return;
         }
         skips.put(player.getUniqueId(), remaining - 1);
         assignNewTarget(player, true);
         giveSkipItem(player);
         Messages.send(player, Messages.Type.INFO,
-                "Ziel übersprungen – noch " + (remaining - 1) + " Skips.");
+                "Ziel übersprungen – noch " + (remaining - 1) + " Überspringen übrig.");
     }
 
     private void assignNewTarget(Player player, boolean avoidCurrent) {
@@ -846,8 +846,8 @@ public final class ChallengeManager implements GameInstance {
     public void playerQuit(Player player) {
         saveRunSnapshot(player);
         BossBar bar = bossBars.remove(player.getUniqueId());
-        if (bar != null) player.hideBossBar(bar);
-        player.sendActionBar(Component.empty());
+        if (bar != null) plugin.challengeHud().hideBossBar(player, bar);
+        plugin.challengeHud().sendActionBar(player, Component.empty());
         if (state == ChallengeState.COUNTDOWN && readyCountdown
                 && readyPlayers.remove(player.getUniqueId())) {
             cancelReadyCountdown(player);
@@ -861,8 +861,8 @@ public final class ChallengeManager implements GameInstance {
     public void playerLeftMap(Player player) {
         saveRunSnapshot(player);
         BossBar bar = bossBars.remove(player.getUniqueId());
-        if (bar != null) player.hideBossBar(bar);
-        player.sendActionBar(Component.empty());
+        if (bar != null) plugin.challengeHud().hideBossBar(player, bar);
+        plugin.challengeHud().sendActionBar(player, Component.empty());
         if (state == ChallengeState.COUNTDOWN && readyCountdown
                 && readyPlayers.remove(player.getUniqueId())) {
             cancelReadyCountdown(player);
@@ -1056,7 +1056,7 @@ public final class ChallengeManager implements GameInstance {
         ItemMeta meta = item.getItemMeta();
         meta.displayName(Component.text("Mob überspringen", NamedTextColor.AQUA));
         meta.lore(List.of(Component.text(
-                remaining + " von " + MAX_SKIPS + " Skips übrig", NamedTextColor.GRAY)));
+                remaining + " von " + MAX_SKIPS + " Überspringen übrig", NamedTextColor.GRAY)));
         meta.getPersistentDataContainer().set(skipKey, PersistentDataType.BYTE, (byte) 1);
         item.setItemMeta(meta);
         item.setAmount(Math.max(1, remaining));
@@ -1100,7 +1100,7 @@ public final class ChallengeManager implements GameInstance {
     private ItemStack createBackToLobbyItem() {
         ItemStack item = new ItemStack(Material.RED_BED);
         ItemMeta meta = item.getItemMeta();
-        meta.displayName(Component.text("Back to Lobby", NamedTextColor.RED));
+        meta.displayName(Component.text("Zur Lobby", NamedTextColor.RED));
         meta.lore(List.of(Component.text("Rechtsklick, um zur Lobby zurückzukehren", NamedTextColor.GRAY)));
         meta.getPersistentDataContainer().set(backToLobbyKey, PersistentDataType.BYTE, (byte) 1);
         item.setItemMeta(meta);
@@ -1122,13 +1122,13 @@ public final class ChallengeManager implements GameInstance {
         if (target == null) return;
         BossBar bar = bossBars.computeIfAbsent(player.getUniqueId(), ignored -> {
             BossBar created = BossBar.bossBar(Component.empty(), 1.0f, BossBar.Color.GREEN, BossBar.Overlay.PROGRESS);
-            player.showBossBar(created);
+            plugin.challengeHud().showBossBar(player, created);
             return created;
         });
         bar.name(Component.text("Verbleibende Zeit: " + formatClock(secondsRemaining), NamedTextColor.GOLD));
         bar.progress(Math.max(0.0f, Math.min(1.0f,
                 secondsRemaining / (float) Math.max(1, activeRoundDurationSeconds))));
-        player.sendActionBar(Component.text("Dein Ziel: ", NamedTextColor.GRAY)
+        plugin.challengeHud().sendActionBar(player, Component.text("Dein Ziel: ", NamedTextColor.GRAY)
                 .append(Component.text(targetName(target), NamedTextColor.GOLD)));
     }
 
@@ -1136,8 +1136,8 @@ public final class ChallengeManager implements GameInstance {
         bossBars.forEach((uuid, bar) -> {
             Player player = Bukkit.getPlayer(uuid);
             if (player != null) {
-                player.hideBossBar(bar);
-                player.sendActionBar(Component.empty());
+                plugin.challengeHud().hideBossBar(player, bar);
+                plugin.challengeHud().sendActionBar(player, Component.empty());
             }
         });
         bossBars.clear();
@@ -1152,7 +1152,7 @@ public final class ChallengeManager implements GameInstance {
 
     private void assignScoreboard(Player player) {
         if (scoreboard == null) setupScoreboard();
-        player.setScoreboard(scoreboard);
+        plugin.challengeHud().setScoreboard(player, scoreboard);
     }
 
     private void updateScoreboard() {
