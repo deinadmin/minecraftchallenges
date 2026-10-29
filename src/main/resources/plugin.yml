@@ -5,6 +5,10 @@ description: Lobby und erweiterbares Challenge-System für einen Paper-Server
 author: Carl
 api-version: '26.3'
 commands:
+  npc:
+    description: Öffnet die Admin-Verwaltung der Lobby-NPCs
+    usage: /npc
+    permission: minecraftchallenges.rank.admin
   challenge:
     description: Verwaltung der Challenges
     usage: /challenge <menu|stop|setlobby|reload>

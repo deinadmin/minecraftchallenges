@@ -56,3 +56,18 @@ tasks.register("deployPlugin") {
     description = "Baut das Plugin und kopiert es nach server/plugins."
     dependsOn(tasks.build)
 }
+
+// Executable policy checks use the API compile classpath; no test framework or server required.
+val npcTest = sourceSets.create("npcTest") {
+    compileClasspath += sourceSets.main.get().output + configurations.compileClasspath.get()
+    runtimeClasspath += output + compileClasspath
+}
+val npcPolicyTest = tasks.register<JavaExec>("npcPolicyTest") {
+    group = "verification"
+    description = "Checks NPC Quick Join selection, capacity, and custom slot availability."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.npc.QuickJoinTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(npcPolicyTest) }

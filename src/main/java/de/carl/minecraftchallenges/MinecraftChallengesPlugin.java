@@ -17,6 +17,7 @@ import de.carl.minecraftchallenges.menu.ChallengeMenu;
 import de.carl.minecraftchallenges.menu.AdminMenu;
 import de.carl.minecraftchallenges.menu.LobbyMenu;
 import de.carl.minecraftchallenges.rank.RankService;
+import de.carl.minecraftchallenges.npc.NpcService;
 import de.carl.minecraftchallenges.randomizer.RandomizerChallenge;
 import de.carl.minecraftchallenges.randomizer.RandomizerChallengeListener;
 import de.carl.minecraftchallenges.randomizer.RandomizerType;
@@ -46,6 +47,7 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
     private SmpService smp;
     private BackupService backups;
     private ShopMenu shopMenu;
+    private NpcService npcs;
 
     @Override
     public void onEnable() {
@@ -115,6 +117,11 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
         });
         getServer().getPluginManager().registerEvents(customSlots, this);
         CustomChallengeMenu customMenu = new CustomChallengeMenu(this, lobbies, challengeMenu, customSlots);
+        npcs = new NpcService(this, lobbyService, lobbies,
+                challengeMenu, lobbyMenu, customMenu);
+        getServer().getPluginManager().registerEvents(npcs, this);
+        PluginCommand npcCommand = getCommand("npc");
+        if (npcCommand != null) npcCommand.setExecutor(npcs);
         AdminMenu adminMenu = new AdminMenu();
         LobbyIsolationService isolation = new LobbyIsolationService(this, lobbyService, lobbies, smp);
 
@@ -208,6 +215,7 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (npcs != null) npcs.shutdown();
         if (backups != null) backups.shutdown();
         if (smp != null) smp.shutdown();
         if (jumpAndRunService != null) {

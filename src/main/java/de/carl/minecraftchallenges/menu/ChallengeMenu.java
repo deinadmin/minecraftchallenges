@@ -72,8 +72,15 @@ public final class ChallengeMenu {
         player.openInventory(inventory);
     }
 
+    public boolean isSmpAvailable() {
+        return smp != null;
+    }
+
     public void selectSmp(Player player) {
-        if (smp == null) return;
+        if (smp == null) {
+            Messages.send(player, Messages.Type.ERROR, "Das SMP ist gerade nicht verfügbar.");
+            return;
+        }
         player.closeInventory();
         smp.join(player);
     }

@@ -97,11 +97,40 @@ Die Serverausgabe landet in `server/logs/dev-console.log` und im normalen Paper-
 | `/challenge setlobby` | Speichert den aktuellen Standort als Lobby | `minecraftchallenges.command.setlobby` |
 | `/challenge reload` | Lädt `config.yml` neu | `minecraftchallenges.command.reload` |
 | `/lobby` | Teleportiert den Spieler in die Lobby | alle |
+| `/npc` | Öffnet die Lobby-NPC-Verwaltung | `minecraftchallenges.rank.admin` |
 | `/edit` | Aktiviert oder speichert und beendet den Lobby-Edit-Modus | `minecraftchallenges.command.edit` |
 | `/jumpnrun trigger set` | Aktiviert die Druckplatte, auf die du schaust | `minecraftchallenges.command.jumpnrun` |
 | `/jumpnrun trigger list` | Listet alle aktivierten Druckplatten | `minecraftchallenges.command.jumpnrun` |
 | `/jumpnrun trigger reset` | Löscht alle Trigger und laufenden Strecken | `minecraftchallenges.command.jumpnrun` |
 | `/jumpnrun spawn set/remove` | Verwaltet das Navigationsziel | `minecraftchallenges.command.jumpnrun` |
+
+## Lobby-NPCs
+
+Als Admin in der Lobby an die gewünschte NPC-Position stellen, in die gewünschte Richtung schauen
+und `/npc` öffnen. **NPC erstellen** → Navigator-Aktion oder **Eigener Befehl** auswählen →
+Skin-Username und gegebenenfalls Befehl im Eingabemenü speichern.
+Der schwebende Name entspricht immer der gewählten Challenge oder Aktion.
+Position und Blickrichtung stammen vom Öffnen des Befehls. Im selben Menü lassen sich vorhandene
+NPCs bearbeiten, an die aktuelle Position versetzen oder nach Bestätigung löschen.
+Im `/edit`-Modus öffnet ein Rechtsklick auf einen NPC direkt dessen Bearbeitungsmenü;
+dort lassen sich Skin und Aktion ändern. Nach erneutem `/edit` führt der Rechtsklick wieder die NPC-Aktion aus.
+Die Daten bleiben in `plugins/MinecraftChallenges/npcs.yml` über Neustarts erhalten.
+Es wird kein zusätzliches NPC-Plugin benötigt.
+
+- Challenge-NPCs: Linksklick und Berühren versuchen Quick Join; Rechtsklick öffnet die bekannte Lobby-Auswahl.
+- Quick Join bevorzugt die beitretbare Lobby mit den meisten Spielern, bei Gleichstand die niedrigste Lobby-Nummer.
+  Volle Lobbys, laufende Runden, Countdowns und regenerierende Welten werden übersprungen.
+  Gibt es keine passende Lobby, öffnet sich die Lobby-Auswahl.
+- Eigene Challenges: Quick Join berücksichtigt nur bereits erstellte, beitretbare Challenges.
+  Ohne passende Challenge entfällt der Quick-Join-Hinweis; alle Interaktionen öffnen die Liste zum Beitreten oder Erstellen.
+- Jump'n'Run und SMP nutzen dieselben Ziele und Zugangsregeln wie der Navigator.
+- Befehle werden bei Rechtsklick oder Berühren als interagierender Spieler mit dessen Rechten ausgeführt.
+  Ein führender `/` ist optional; `{player}` wird durch den Spielernamen ersetzt.
+- Berühren wird einmal beim Hineinlaufen ausgelöst. Ein kurzer Cooldown verhindert Mehrfachaktionen;
+  beim Verwalten und im Lobby-Bearbeitungsmodus werden keine Berührungsaktionen ausgeführt.
+
+`./gradlew npcPolicyTest` prüft die Quick-Join-Auswahl inklusive voller Lobbys und geschlossener eigener Challenges.
+Diese Prüfungen laufen auch bei `./gradlew build`.
 
 ## Ränge und Permissions
 

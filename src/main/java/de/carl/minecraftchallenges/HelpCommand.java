@@ -80,6 +80,8 @@ public final class HelpCommand implements CommandExecutor, Listener {
                 "/lobby", "Bringt dich zurück in die Lobby (/hub, /l)");
         add(entries, sender, false, null, false, "/help", "Zeigt diese Hilfe");
         if (hub) {
+            add(entries, sender, true, RankService.ADMIN, true,
+                    "/npc", "Lobby-NPCs erstellen, bearbeiten und entfernen");
             add(entries, sender, true, "minecraftchallenges.command.challenge-menu", false,
                     "/challenge menu", "Öffnet das Navigationsmenü");
             add(entries, sender, true, "minecraftchallenges.command.edit", true,
