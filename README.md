@@ -116,6 +116,8 @@ Im `/edit`-Modus öffnet ein Rechtsklick auf einen NPC direkt dessen Bearbeitung
 dort lassen sich Skin und Aktion ändern. Nach erneutem `/edit` führt der Rechtsklick wieder die NPC-Aktion aus.
 Die Daten bleiben in `plugins/MinecraftChallenges/npcs.yml` über Neustarts erhalten.
 Es wird kein zusätzliches NPC-Plugin benötigt.
+Jeder Spieler sieht die NPCs individuell zu seiner eigenen Augenposition schauen. Kopf- und Körperrotation
+werden nur an den jeweiligen Client gesendet; die gespeicherte Position und Ausrichtung bleiben erhalten.
 
 - Challenge-NPCs: Linksklick und Berühren versuchen Quick Join; Rechtsklick öffnet die bekannte Lobby-Auswahl.
 - Quick Join bringt bisherige Teilnehmer zuerst in ihre noch laufende Runde (auch während des Countdowns) zurück.

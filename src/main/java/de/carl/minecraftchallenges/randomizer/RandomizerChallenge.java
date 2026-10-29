@@ -546,6 +546,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         clearRunSnapshots();
         ready.clear();
         updateScoreboard();
+        if (ownedPlayers().stream().noneMatch(ranks::canManageChallenge)) regenerate((UUID) null);
     }
 
     public int configuredDuration() {
@@ -628,7 +629,12 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
     public void regenerate(Player player) {
         if (!ranks.canManageChallenge(player) || isRoundActive() || world == null
                 || state == ChallengeState.REGENERATING) return;
+        regenerate(player.getUniqueId());
+    }
+
+    private void regenerate(UUID adminId) {
         state = ChallengeState.REGENERATING;
+        broadcast("Die Challenge-Welt wird neu generiert. Du kommst gleich automatisch zurück.", Messages.Type.INFO);
         List<UUID> oldParticipants = new ArrayList<>(participants);
         List<UUID> oldSpectators = new ArrayList<>(spectators);
         pendingReturn.clear();
@@ -637,7 +643,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         ownedPlayers().forEach(lobby::sendToRegenerationLobby);
         participants.clear(); spectators.clear(); ready.clear();
         clearRunSnapshots();
-        attemptRegeneration(player.getUniqueId(), oldParticipants, oldSpectators, 0);
+        attemptRegeneration(adminId, oldParticipants, oldSpectators, 0);
     }
 
     private boolean mayReturnAfterRegeneration(Player player) {
@@ -656,9 +662,10 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
                                      List<UUID> oldSpectators, int attempt) {
         if (Bukkit.isTickingWorlds()) {
             if (attempt >= 40) {
+                plugin.getLogger().warning(displayName() + ": Welt konnte momentan nicht neu generiert werden.");
                 state = ChallengeState.WAITING;
                 restorePendingPlayersToLobby();
-                Player admin = Bukkit.getPlayer(adminId);
+                Player admin = adminId == null ? null : Bukkit.getPlayer(adminId);
                 if (admin != null) Messages.send(admin, Messages.Type.ERROR,
                         "Die Welt konnte momentan nicht neu generiert werden.");
                 return;
@@ -668,7 +675,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
             return;
         }
         recreateWorlds().thenCompose(ignored -> prepare()).whenComplete((ready, error) -> {
-            Player player = Bukkit.getPlayer(adminId);
+            Player player = adminId == null ? null : Bukkit.getPlayer(adminId);
             if (error != null || !Boolean.TRUE.equals(ready)) {
                 plugin.getLogger().severe("Randomizer-Welt konnte nicht regeneriert werden: "
                         + (error == null ? "Vorbereitung fehlgeschlagen" : error.getMessage()));

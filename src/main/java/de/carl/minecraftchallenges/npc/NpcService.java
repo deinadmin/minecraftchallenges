@@ -55,6 +55,8 @@ public final class NpcService implements Listener, CommandExecutor {
     private final Set<Chunk> tickets = new HashSet<>();
     private final BukkitTask ticker;
     private final Path file;
+    private final NpcLookPackets lookPackets;
+    private boolean lookErrorLogged;
     private int ticks;
 
     private record Definition(UUID id, Location location, String skin, String action, String command) {
@@ -85,6 +87,10 @@ public final class NpcService implements Listener, CommandExecutor {
         this.navigator = navigator; this.lobbyMenu = lobbyMenu; this.customMenu = customMenu;
         entityKey = new NamespacedKey(plugin, "lobby_npc");
         file = plugin.getDataFolder().toPath().resolve("npcs.yml");
+        try { lookPackets = new NpcLookPackets(); }
+        catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Paper NPC rotation packet layout is unsupported", error);
+        }
         load();
         ticker = Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 1, 1);
     }
@@ -362,6 +368,7 @@ public final class NpcService implements Listener, CommandExecutor {
                 }
             }
         }
+        if (ticks % 2 == 0) updateNpcLooks();
         for (Player player : Bukkit.getOnlinePlayers()) {
             Set<UUID> previous = touching.getOrDefault(player.getUniqueId(), Set.of());
             Set<UUID> current = new HashSet<>();
@@ -377,6 +384,28 @@ public final class NpcService implements Listener, CommandExecutor {
             touching.put(player.getUniqueId(), current);
             if (player.getOpenInventory().getTopInventory().getType() != InventoryType.CRAFTING) continue;
             for (UUID id : current) if (!previous.contains(id)) { activate(player, definitions.get(id), true); break; }
+        }
+    }
+
+    private void updateNpcLooks() {
+        for (Actors actor : actors.values()) {
+            Mannequin npc = actor.body;
+            if (!npc.isValid()) continue;
+            Location eyes = npc.getEyeLocation();
+            for (Player viewer : npc.getTrackedBy()) {
+                if (!viewer.isOnline() || viewer.getWorld() != npc.getWorld() || !viewer.canSee(npc)) continue;
+                Location target = viewer.getEyeLocation();
+                NpcLookDirection direction = NpcLookDirection.towards(target.getX() - eyes.getX(),
+                        target.getY() - eyes.getY(), target.getZ() - eyes.getZ(), eyes.getYaw());
+                try { lookPackets.send(viewer, npc, direction); }
+                catch (ReflectiveOperationException error) {
+                    if (!lookErrorLogged) {
+                        lookErrorLogged = true;
+                        plugin.getLogger().log(java.util.logging.Level.SEVERE,
+                                "NPC-Blickrichtung konnte nicht an den Spieler gesendet werden", error);
+                    }
+                }
+            }
         }
     }
 

@@ -174,6 +174,16 @@ public final class ChallengeManager implements GameInstance {
             return;
         }
 
+        regenerateWorld(admin.getUniqueId(), "von " + admin.getName());
+    }
+
+    private void regenerateAfterRound() {
+        if (challengePlayers().stream().noneMatch(ranks::canManageChallenge)) {
+            regenerateWorld(null, "automatisch nach Rundenende");
+        }
+    }
+
+    private void regenerateWorld(UUID adminId, String cause) {
         List<UUID> returningPlayers = challengePlayers().stream().map(Player::getUniqueId).toList();
         state = ChallengeState.REGENERATING;
         regeneratingPlayers.clear();
@@ -193,10 +203,10 @@ public final class ChallengeManager implements GameInstance {
 
         returningPlayers.stream().map(Bukkit::getPlayer).filter(Objects::nonNull)
                 .forEach(player -> Messages.send(player, Messages.Type.INFO,
-                        "Die Challenge-Welt von Lobby " + lobbyId + " wird von "
-                                + admin.getName() + " neu generiert."));
+                        "Die Challenge-Welt von Lobby " + lobbyId + " wird "
+                                + cause + " neu generiert."));
         Bukkit.getScheduler().runTaskLater(plugin,
-                () -> attemptWorldRegeneration(admin.getUniqueId(), returningPlayers, 0), 20L);
+                () -> attemptWorldRegeneration(adminId, returningPlayers, 0), 20L);
     }
 
     private void attemptWorldRegeneration(UUID adminId, List<UUID> returningPlayers, int attempt) {
@@ -281,6 +291,10 @@ public final class ChallengeManager implements GameInstance {
     }
 
     private void notifyAdmin(UUID adminId, String message, NamedTextColor color) {
+        if (adminId == null) {
+            if (color == NamedTextColor.RED) plugin.getLogger().severe(displayName() + ": " + message);
+            return;
+        }
         Player admin = Bukkit.getPlayer(adminId);
         if (admin != null) Messages.send(admin, 
                 color == NamedTextColor.RED ? Messages.Type.ERROR
@@ -765,6 +779,7 @@ public final class ChallengeManager implements GameInstance {
             giveWaitingItems(player);
         }
         updateScoreboard();
+        regenerateAfterRound();
     }
 
     public void stopRound() {
@@ -788,6 +803,7 @@ public final class ChallengeManager implements GameInstance {
                 giveWaitingItems(player);
             });
             updateScoreboard();
+            regenerateAfterRound();
         }
     }
 

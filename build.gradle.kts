@@ -82,3 +82,13 @@ val chatFormatTest = tasks.register<JavaExec>("chatFormatTest") {
     javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
 }
 tasks.check { dependsOn(chatFormatTest) }
+
+val npcLookTest = tasks.register<JavaExec>("npcLookTest") {
+    group = "verification"
+    description = "Checks per-viewer NPC yaw and pitch, vertical targets and independent viewers."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.npc.NpcLookDirectionTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(npcLookTest) }

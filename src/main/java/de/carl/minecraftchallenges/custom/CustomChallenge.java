@@ -74,6 +74,10 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
     private static final double ONE_HEART = 2.0;
     private static final double MAX_BONUS_HEALTH = 40.0;
     private static final double MAX_BORDER_SIZE = 59_999_968.0;
+    private static final double VISIBLE_BORDER_OPENING_SIZE = 320.0;
+    private static final long BORDER_OPENING_SECONDS = 30L;
+    private static final long BORDER_ANIMATION_OVERSHOOT_SECONDS = 10L;
+    private static final long BORDER_REMOVAL_SECONDS = 6L;
     private static final List<PotionEffectType> RANDOM_EFFECTS = List.of(
             PotionEffectType.SPEED, PotionEffectType.SLOWNESS, PotionEffectType.HASTE,
             PotionEffectType.MINING_FATIGUE, PotionEffectType.JUMP_BOOST, PotionEffectType.NAUSEA,
@@ -113,6 +117,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
     private World end;
     private BukkitTask countdownTask;
     private BukkitTask timerTask;
+    private BukkitTask borderDisableTask;
     private int elapsedSeconds;
     private int remainingSeconds;
     private int emptyRoundSeconds;
@@ -428,8 +433,21 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
      */
     public void regenerate(Player player) {
         if (!canEdit(player) || isCreating()) return;
+        regenerate(player.getUniqueId(), player.getName());
+    }
+
+    private void regenerateAfterRound() {
+        // The round owner can manage custom challenges even without a staff permission.
+        if (presentPlayers().stream().noneMatch(this::canManage)) {
+            regenerate(null, "Das System");
+        }
+    }
+
+    private void regenerate(UUID adminId, String initiator) {
+        if (!isActive() || (state != ChallengeState.WAITING && state != ChallengeState.FINISHED)) return;
+        if (adminId == null && presentPlayers().stream().anyMatch(this::canManage)) return;
         if (Bukkit.isTickingWorlds()) {
-            Bukkit.getScheduler().runTask(plugin, () -> regenerate(player));
+            Bukkit.getScheduler().runTask(plugin, () -> regenerate(adminId, initiator));
             return;
         }
         state = ChallengeState.REGENERATING;
@@ -440,7 +458,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
             pendingReturn.add(present.getUniqueId());
             present.closeInventory();
             lobby.sendToRegenerationLobby(present);
-            Messages.send(present, Messages.Type.INFO, player.getName() + " generiert die Welt von "
+            Messages.send(present, Messages.Type.INFO, initiator + " generiert die Welt von "
                     + displayName() + " neu. Du kommst gleich automatisch zurück.");
         }
         participants.clear();
@@ -457,9 +475,10 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
             if (world != null && Bukkit.getWorld(world.getUID()) != null) {
                 state = ChallengeState.WAITING;
                 returnPendingPlayers();
-                Messages.send(player, Messages.Type.ERROR, "Die Welt konnte nicht neu generiert werden.");
+                Player admin = adminId == null ? null : Bukkit.getPlayer(adminId);
+                if (admin != null) Messages.send(admin, Messages.Type.ERROR, "Die Welt konnte nicht neu generiert werden.");
             } else {
-                abortRegeneration(player.getUniqueId());
+                abortRegeneration(adminId);
             }
             return;
         }
@@ -468,7 +487,6 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
         world = null;
         Map<String, Path> folders = new HashMap<>(unloadedFolders);
         unloadedFolders.clear();
-        UUID adminId = player.getUniqueId();
         CompletableFuture.allOf(folders.entrySet().stream()
                         .map(entry -> WorldFiles.deleteUnloadedWorldAsync(plugin, entry.getKey(), entry.getValue()))
                         .toArray(CompletableFuture[]::new))
@@ -523,6 +541,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
     }
 
     private void stopTasks() {
+        cancelBorderDisableTask();
         if (countdownTask != null) countdownTask.cancel();
         if (timerTask != null) timerTask.cancel();
         countdownTask = null;
@@ -716,6 +735,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
             state = ChallengeState.WAITING;
             broadcast(Messages.Type.INFO, player.getName() + " hat den Start abgebrochen.");
             updateScoreboard();
+            regenerateAfterRound();
             return;
         }
         if (state != ChallengeState.WAITING && state != ChallengeState.FINISHED) return;
@@ -767,7 +787,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
         if (settings.has(CustomRule.RANDOM_CRAFTING)) mappings.shuffleRecipes();
         if (settings.has(CustomRule.RANDOM_BLOCK_DROPS)) mappings.shuffleBlockDrops();
         sharedHealth = startHealth();
-        world.getWorldBorder().setSize(MAX_BORDER_SIZE);
+        animateBorderOpening();
         applyRoundWorldRules();
         if (settings.has(CustomRule.SPONGE_WORLD)) {
             worldHasSponge = true;
@@ -850,6 +870,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
             state = ChallengeState.WAITING;
             broadcast(Messages.Type.INFO, "Der Start wurde abgebrochen.");
             updateScoreboard();
+            regenerateAfterRound();
         } else if (isRunning()) {
             finish(false, "Runde gestoppt");
         }
@@ -880,6 +901,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
         lastLocations.clear();
         activateWaitingBorder();
         updateScoreboard();
+        regenerateAfterRound();
     }
 
     // ---------------------------------------------------------------- rule hooks (called by the listener)
@@ -1188,6 +1210,7 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
     }
 
     private void activateWaitingBorder() {
+        cancelBorderDisableTask();
         if (world == null) return;
         double radius = Math.max(5.0, plugin.getConfig().getDouble("challenge.waiting-world-border-radius", 40.0));
         Location center = waitingSpawn();
@@ -1197,6 +1220,30 @@ public final class CustomChallenge implements GameInstance, RandomizedWorld {
         border.setWarningDistance(Math.min(5, Math.max(0, (int) radius - 1)));
         border.setDamageAmount(1.0);
         border.setDamageBuffer(0.0);
+    }
+
+    private void animateBorderOpening() {
+        if (world == null) return;
+        activateWaitingBorder();
+        WorldBorder border = world.getWorldBorder();
+        double sizePerSecond = (VISIBLE_BORDER_OPENING_SIZE - border.getSize()) / BORDER_OPENING_SECONDS;
+        if (sizePerSecond <= 0.0) {
+            border.setSize(MAX_BORDER_SIZE);
+            return;
+        }
+        // Match Mob Hunt: grow smoothly at the same speed, then remove after six seconds.
+        double animationTarget = VISIBLE_BORDER_OPENING_SIZE
+                + sizePerSecond * BORDER_ANIMATION_OVERSHOOT_SECONDS;
+        border.changeSize(animationTarget, BORDER_OPENING_SECONDS + BORDER_ANIMATION_OVERSHOOT_SECONDS);
+        borderDisableTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            borderDisableTask = null;
+            if (isRunning() && world != null) world.getWorldBorder().setSize(MAX_BORDER_SIZE);
+        }, BORDER_REMOVAL_SECONDS * 20L);
+    }
+
+    private void cancelBorderDisableTask() {
+        if (borderDisableTask != null) borderDisableTask.cancel();
+        borderDisableTask = null;
     }
 
     private void resetPlayerState(Player player) {
