@@ -143,6 +143,16 @@ val claimRulesTest = tasks.register<JavaExec>("claimRulesTest") {
 }
 tasks.check { dependsOn(claimRulesTest) }
 
+val chunkSetTest = tasks.register<JavaExec>("chunkSetTest") {
+    group = "verification"
+    description = "Checks the compact chunk set used to remember scanned chunks."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.smp.ChunkSetTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(chunkSetTest) }
+
 // Opt-in only: this plugin creates disposable worlds and stops its test server when finished.
 tasks.register<Jar>("performanceSmokeJar") {
     group = "verification"

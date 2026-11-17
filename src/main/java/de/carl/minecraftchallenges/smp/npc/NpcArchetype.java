@@ -27,6 +27,19 @@ public record NpcArchetype(String key, String name, String role, String skin, Ma
         return structures.isEmpty();
     }
 
+    /**
+     * Quest givers of these structures stroll around inside them. Only places with solid walkable floors and no
+     * traps: villages, the large nether and end structures, outposts, mansions, trial chambers and ancient cities.
+     * Pyramids (pressure plates, TNT), mineshafts, the stronghold's lava room, tiny huts, ruined portals (lava)
+     * and everything underwater keep their quest giver standing still.
+     */
+    private static final java.util.Set<String> ROAMING = java.util.Set.of("village", "fortress", "bastion", "outpost",
+            "mansion", "trial_chambers", "end_city", "ancient_city");
+
+    public boolean roams() {
+        return ROAMING.contains(key);
+    }
+
     public static NpcArchetype get(String key) {
         return ALL.get(key);
     }
@@ -79,7 +92,9 @@ public record NpcArchetype(String key, String name, String role, String skin, Ma
                 kill("bastion_brute", 2, 3, 30, "Töte 3 Piglin-Barbaren", Material.GOLDEN_AXE, "PIGLIN_BRUTE"),
                 kill("bastion_hoglin", 2, 8, 30, "Töte 8 Hoglins", Material.PORKCHOP, "HOGLIN"),
                 mine("bastion_nether_gold", 1, 24, 20, "Baue 24 Nethergolderz ab", Material.NETHER_GOLD_ORE),
-                mine("bastion_gilded", 2, 6, 30, "Baue 6 Golddurchzogenen Schwarzstein ab", Material.GILDED_BLACKSTONE));
+                mine("bastion_gilded", 2, 6, 30, "Baue 6 Golddurchzogenen Schwarzstein ab", Material.GILDED_BLACKSTONE),
+                mine("bastion_gold_blocks", 2, 3, 30, "Baue 3 Goldblöcke ab und bring sie mir", Material.GOLD_BLOCK)
+                        .handingIn(Material.GOLD_BLOCK));
 
         // ------------------------------------------------------------ End
         giver("end_city", "Elyth", "Sternenwächter der Endstadt", Material.END_ROD, List.of("end_city"), 100, false,
@@ -118,6 +133,8 @@ public record NpcArchetype(String key, String name, String role, String skin, Ma
         giver("village", "Marten", "Dorfältester", Material.WHEAT,
                 List.of("village_plains", "village_desert", "village_savanna", "village_snowy", "village_taiga"), 35, false,
                 harvest("village_wheat", 1, 96, 20, "Ernte 96 reifen Weizen", Material.WHEAT, Material.WHEAT),
+                harvest("village_wheat_deliver", 1, 64, 20, "Ernte 64 reife Weizen und bring sie mir", Material.HAY_BLOCK,
+                        Material.WHEAT).handingIn(Material.WHEAT),
                 harvest("village_roots", 1, 96, 20, "Ernte 96 reife Karotten, Kartoffeln oder Rote Bete", Material.CARROT,
                         Material.CARROTS, Material.POTATOES, Material.BEETROOTS),
                 kill("village_zombie", 1, 20, 30, "Töte 20 Zombies", Material.ROTTEN_FLESH, "ZOMBIE", "ZOMBIE_VILLAGER"),
@@ -128,6 +145,8 @@ public record NpcArchetype(String key, String name, String role, String skin, Ma
                 kill("desert_spider", 1, 12, 30, "Töte 12 Spinnen", Material.STRING, "SPIDER", "CAVE_SPIDER"));
         giver("jungle_pyramid", "Itzo", "Fährtenleser des Tempels", Material.SPYGLASS, List.of("jungle_pyramid"), 100, false,
                 harvest("jungle_cocoa", 1, 32, 20, "Ernte 32 reife Kakaofrüchte", Material.COCOA_BEANS, Material.COCOA),
+                harvest("jungle_cocoa_deliver", 1, 32, 20, "Ernte 32 reife Kakaofrüchte und bring mir die Bohnen", Material.COCOA_BEANS,
+                        Material.COCOA).handingIn(Material.COCOA_BEANS),
                 mine("jungle_melon", 1, 48, 20, "Baue 48 Melonen ab", Material.MELON),
                 kill("jungle_creeper", 2, 10, 30, "Töte 10 Creeper", Material.GUNPOWDER, "CREEPER"));
         giver("igloo", "Nuuk", "Eisfischer", Material.FISHING_ROD, List.of("igloo"), 100, false,
@@ -143,6 +162,10 @@ public record NpcArchetype(String key, String name, String role, String skin, Ma
                 mine("mineshaft_gold", 1, 20, 30, "Baue 20 Golderz ab", Material.GOLD_ORE, Material.DEEPSLATE_GOLD_ORE),
                 mine("mineshaft_redstone", 1, 40, 30, "Baue 40 Redstone-Erz ab", Material.REDSTONE_ORE, Material.DEEPSLATE_REDSTONE_ORE),
                 mine("mineshaft_diamond", 2, 12, 60, "Baue 12 Diamanterz ab", Material.DIAMOND_ORE, Material.DEEPSLATE_DIAMOND_ORE),
+                mine("mineshaft_iron_deliver", 1, 24, 30, "Baue 24 Eisenerz ab und bring mir das Roheisen",
+                        Material.IRON_ORE, Material.DEEPSLATE_IRON_ORE).handingIn(Material.RAW_IRON),
+                mine("mineshaft_diamond_deliver", 2, 5, 45, "Baue 5 Diamanterz ab und bring mir die Diamanten",
+                        Material.DIAMOND_ORE, Material.DEEPSLATE_DIAMOND_ORE).handingIn(Material.DIAMOND),
                 kill("mineshaft_cave_spider", 1, 15, 25, "Töte 15 Höhlenspinnen", Material.SPIDER_EYE, "CAVE_SPIDER"));
         giver("shipwreck", "Tam", "Schiffbrüchiger", Material.COD, List.of("shipwreck", "shipwreck_beached"), 30, true,
                 fish("shipwreck_fish", 1, 15, 30, "Angle 15 Fänge"),
@@ -151,6 +174,8 @@ public record NpcArchetype(String key, String name, String role, String skin, Ma
                 List.of("ruined_portal", "ruined_portal_desert", "ruined_portal_jungle", "ruined_portal_mountain",
                         "ruined_portal_nether", "ruined_portal_ocean", "ruined_portal_swamp"), 25, true,
                 mine("portal_obsidian", 1, 10, 15, "Baue 10 Obsidian ab", Material.OBSIDIAN),
+                mine("portal_obsidian_deliver", 1, 16, 25, "Baue 16 Obsidian ab und bring ihn mir", Material.OBSIDIAN)
+                        .handingIn(Material.OBSIDIAN),
                 mine("portal_crying", 1, 4, 30, "Baue 4 Weinenden Obsidian ab", Material.CRYING_OBSIDIAN),
                 kill("portal_zombified", 1, 12, 30, "Töte 12 Zombifizierte Piglins", Material.GOLD_NUGGET, "ZOMBIFIED_PIGLIN"),
                 kill("portal_enderman", 1, 8, 30, "Töte 8 Endermen", Material.ENDER_PEARL, "ENDERMAN"));

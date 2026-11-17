@@ -204,7 +204,7 @@ public final class NpcMenus implements Listener {
         lore.add(SmpText.gray("Zeit: ").append(SmpText.plain(quest.minutes() + " Minuten", NamedTextColor.WHITE)));
         lore.add(SmpText.gray("Schwierigkeit: ").append(SmpText.plain("★".repeat(quest.tier()) + "☆".repeat(3 - quest.tier()),
                 quest.tier() == 1 ? NamedTextColor.GREEN : quest.tier() == 2 ? NamedTextColor.YELLOW : NamedTextColor.RED)));
-        if (quest.handIn() != null) lore.add(SmpText.gray("Die abgebauten Items gibst du am Ende ab."));
+        if (quest.handIn() != null) lore.add(SmpText.gray("Am Ende wirfst du die Items vor mir auf den Boden."));
         lore.add(Component.empty());
         QuestService.Progress progress = quests.progress(viewer);
         switch (quests.status(viewer, npc, quest)) {
@@ -214,7 +214,15 @@ public final class NpcMenus implements Listener {
                         + QuestService.clock(progress.remainingSeconds()), NamedTextColor.AQUA));
                 lore.add(SmpText.plain("Shift-Klick: abbrechen", NamedTextColor.DARK_GRAY));
             }
-            case READY -> lore.add(SmpText.plain("Erfüllt! Klicken für die Belohnung", NamedTextColor.GREEN));
+            case READY -> {
+                if (quest.handIn() == null) {
+                    lore.add(SmpText.plain("Erfüllt! Klicken für die Belohnung", NamedTextColor.GREEN));
+                } else {
+                    lore.add(SmpText.plain("Erfüllt! Wirf noch " + (quest.amount() - progress.delivered()) + "× ", NamedTextColor.GREEN)
+                            .append(SmpText.name(quest.handIn())).append(SmpText.plain(" vor mir auf den Boden.", NamedTextColor.GREEN)));
+                    lore.add(SmpText.gray("Was ich schon genommen habe, behalte ich."));
+                }
+            }
             case DONE -> lore.add(SmpText.plain("✔ Abgeschlossen", NamedTextColor.GREEN));
             case LOCKED -> lore.add(SmpText.plain("Gesperrt für " + SmpText.duration(quests.lockedSeconds(viewer, npc)), NamedTextColor.RED));
             case BUSY -> lore.add(SmpText.plain("Du hast schon eine andere Quest (/quest).", NamedTextColor.RED));

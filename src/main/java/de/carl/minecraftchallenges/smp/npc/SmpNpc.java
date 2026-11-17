@@ -30,10 +30,18 @@ public final class SmpNpc {
     private final String structure;
     private final List<Stock> stock;
     private final List<Offer> offers;
+    private final int[] bounds;
     private final Map<UUID, Set<Integer>> bought = new HashMap<>();
 
     public SmpNpc(UUID id, NpcArchetype archetype, String world, double x, double y, double z, long expiresAt,
                   String structure, List<Stock> stock, List<Offer> offers) {
+        this(id, archetype, world, x, y, z, expiresAt, structure, stock, offers, null);
+    }
+
+    /** {@code bounds} is {minX, minY, minZ, maxX, maxY, maxZ} (block coordinates, inclusive) of where he may walk. */
+    public SmpNpc(UUID id, NpcArchetype archetype, String world, double x, double y, double z, long expiresAt,
+                  String structure, List<Stock> stock, List<Offer> offers, int[] bounds) {
+        this.bounds = bounds == null || bounds.length != 6 ? null : bounds.clone();
         this.id = id;
         this.archetype = archetype;
         this.world = world;
@@ -58,6 +66,8 @@ public final class SmpNpc {
     public String structure() { return structure; }
     public List<Stock> stock() { return stock; }
     public List<Offer> offers() { return offers; }
+    /** The box a quest giver walks around in, or null if he stands still. */
+    public int[] bounds() { return bounds == null ? null : bounds.clone(); }
     public Map<UUID, Set<Integer>> bought() { return bought; }
 
     public boolean trader() {

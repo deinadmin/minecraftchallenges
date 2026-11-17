@@ -60,6 +60,12 @@ smp:
     # Quest-NPCs erscheinen einmal pro passendem Bauwerk (Netherfestung, Bastion, Endstadt, Monument …),
     # sobald dessen Chunks geladen werden. false stoppt nur neue; vorhandene bleiben stehen.
     quest-givers: true
+    # Quest-NPCs in Dörfern, Netherfestungen, Bastionen, Endstädten, Außenposten, Anwesen, Prüfungskammern und
+    # Antiken Städten laufen im Bauwerk umher, höchstens so viele Blöcke von ihrem Platz entfernt.
+    quest-roam-radius: 24
+    # Umherlaufende NPCs (Händler, Quest-NPCs) gehen nur, solange ein Spieler höchstens so viele Blöcke entfernt ist;
+    # sonst stehen sie still und kosten nichts. 0 = immer laufen.
+    wake-distance: 64
     # Nach einer gescheiterten oder abgebrochenen Quest ist nur dieser eine NPC so lange gesperrt.
     quest-retry-hours: 24
     traders:
@@ -69,6 +75,8 @@ smp:
       # Entfernung vom SMP-Spawn in Blöcken.
       min-distance: 250
       max-distance: 2500
+      # Findet sich innerhalb von max-distance gar kein Platz, wird auch weiter draußen bis zu dieser Entfernung gesucht.
+      fallback-max-distance: 7500
       # Ein Händler läuft in einem Quadrat von so vielen Blöcken in jede Richtung um seinen Standort.
       # Dort sind Abbauen, Bauen und neue Grundstücke gesperrt, solange er da ist.
       roam-radius: 10

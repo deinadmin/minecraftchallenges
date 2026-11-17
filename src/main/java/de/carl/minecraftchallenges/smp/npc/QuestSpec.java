@@ -42,6 +42,21 @@ public record QuestSpec(String id, Type type, Set<String> targets, int amount, i
         return new QuestSpec(id, Type.FISH, Set.of(), amount, minutes, tier, text, Material.FISHING_ROD, null);
     }
 
+    /**
+     * How much work this is compared to an average quest of its tier: 1.0 for a single hard target (boss, elder
+     * guardian) or a typical amount, up to 1.5 for long grinds such as 96 crops, down to 0.75 for short ones.
+     */
+    public double effort() {
+        if (amount <= 3) return 1.0;
+        double typical = switch (type) {
+            case KILL -> 15;
+            case MINE -> 40;
+            case HARVEST -> 64;
+            case FISH -> 12;
+        };
+        return Math.max(0.75, Math.min(1.5, amount / typical));
+    }
+
     /** The NPC also takes the mined items, so the reward has to be worth clearly more. */
     public QuestSpec handingIn(Material item) {
         return new QuestSpec(id, type, targets, amount, minutes, tier, text, icon, item);

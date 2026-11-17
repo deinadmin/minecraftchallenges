@@ -9,6 +9,8 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
+import org.bukkit.Location;
+import org.bukkit.Particle;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.block.Block;
@@ -16,6 +18,8 @@ import org.bukkit.block.data.Ageable;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -28,6 +32,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.util.Vector;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -57,18 +62,22 @@ public final class QuestService implements Listener {
         private final String quest;
         private int count;
         private int remainingSeconds;
+        /** Hand-in items the NPC has already taken; it keeps them even if the player stops halfway. */
+        private int delivered;
 
-        private Progress(UUID npc, String quest, int count, int remainingSeconds) {
+        private Progress(UUID npc, String quest, int count, int remainingSeconds, int delivered) {
             this.npc = npc;
             this.quest = quest;
             this.count = count;
             this.remainingSeconds = remainingSeconds;
+            this.delivered = delivered;
         }
 
         public UUID npc() { return npc; }
         public String quest() { return quest; }
         public int count() { return count; }
         public int remainingSeconds() { return remainingSeconds; }
+        public int delivered() { return delivered; }
     }
 
     private static final int MAX_PLACED_PER_CHUNK = 4096;
@@ -99,6 +108,7 @@ public final class QuestService implements Listener {
         }
         reload();
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::tick, 20L, 20L);
+        plugin.getServer().getScheduler().runTaskTimer(plugin, this::deliveryTick, 5L, 5L);
     }
 
     // ---------------------------------------------------------------- persistence
@@ -121,7 +131,7 @@ public final class QuestService implements Listener {
                 if (section.isConfigurationSection("active")) {
                     active.put(uuid, new Progress(UUID.fromString(section.getString("active.npc", "")),
                             section.getString("active.quest", ""), section.getInt("active.count"),
-                            section.getInt("active.remaining")));
+                            section.getInt("active.remaining"), section.getInt("active.delivered")));
                 }
                 done.put(uuid, new HashSet<>(section.getStringList("done")));
                 ConfigurationSection locks = section.getConfigurationSection("locked");
@@ -151,6 +161,7 @@ public final class QuestService implements Listener {
                 yaml.set(path + ".active.quest", progress.quest);
                 yaml.set(path + ".active.count", progress.count);
                 yaml.set(path + ".active.remaining", progress.remainingSeconds);
+                if (progress.delivered > 0) yaml.set(path + ".active.delivered", progress.delivered);
             }
             Set<String> finished = done.get(uuid);
             if (finished != null && !finished.isEmpty()) yaml.set(path + ".done", new ArrayList<>(finished));
@@ -216,7 +227,7 @@ public final class QuestService implements Listener {
         UUID uuid = player.getUniqueId();
         if (status(uuid, npc, offer.quest()) != Status.AVAILABLE) return;
         QuestSpec quest = offer.quest();
-        active.put(uuid, new Progress(npc.id(), quest.id(), 0, quest.minutes() * 60));
+        active.put(uuid, new Progress(npc.id(), quest.id(), 0, quest.minutes() * 60, 0));
         save();
         Messages.send(player, Messages.Type.SUCCESS, "Quest angenommen: " + quest.text() + ". Du hast "
                 + quest.minutes() + " Minuten. Es zählt nur, was du ab jetzt selbst erledigst.");
@@ -235,37 +246,114 @@ public final class QuestService implements Listener {
         return true;
     }
 
-    /** Hands out the reward of a finished quest. Returns false if the hand-in items are missing. */
+    /**
+     * Clicking a finished quest. Without a hand-in the reward goes into the inventory; with one the player has to
+     * drop the items in front of the NPC instead (see {@link #deliveryTick()}), so this only explains how.
+     */
     public boolean claim(Player player, SmpNpc npc, SmpNpc.Offer offer) {
         UUID uuid = player.getUniqueId();
         QuestSpec quest = offer.quest();
         if (status(uuid, npc, quest) != Status.READY) return false;
         if (quest.handIn() != null) {
-            ItemStack wanted = new ItemStack(quest.handIn());
-            if (!player.getInventory().containsAtLeast(wanted, quest.amount())) {
-                Messages.send(player, Messages.Type.ERROR, Component.text("Bring mir noch " + quest.amount() + "× ")
-                        .append(SmpText.name(quest.handIn())).append(Component.text(", dann gehört die Belohnung dir.")));
-                return false;
-            }
-            wanted.setAmount(quest.amount());
-            player.getInventory().removeItem(wanted);
+            Messages.send(player, Messages.Type.INFO, handInHint(npc, quest, active.get(uuid).delivered));
+            return false;
         }
+        finish(player, npc, offer, false);
+        return true;
+    }
+
+    /** What is still missing, e.g. "Wirf noch 4× Diamant vor Marten auf den Boden". */
+    private static Component handInHint(SmpNpc npc, QuestSpec quest, int delivered) {
+        return Component.text("Wirf noch " + (quest.amount() - delivered) + "× ")
+                .append(SmpText.name(quest.handIn()))
+                .append(Component.text(" vor " + (npc == null ? "deinem Auftraggeber" : npc.title())
+                        + " auf den Boden. Er nimmt sie an sich und gibt dir dann die Belohnung."));
+    }
+
+    /** Gives the reward and closes the quest for good, so it can never be paid twice. */
+    private void finish(Player player, SmpNpc npc, SmpNpc.Offer offer, boolean throwIt) {
+        UUID uuid = player.getUniqueId();
         active.remove(uuid);
-        done.computeIfAbsent(uuid, key -> new HashSet<>()).add(doneKey(npc, quest));
+        done.computeIfAbsent(uuid, key -> new HashSet<>()).add(doneKey(npc, offer.quest()));
         save();
         hideBar(player);
         ItemStack reward = offer.reward().clone();
         Component rewardName = reward.effectiveName();
-        player.getInventory().addItem(reward).values()
-                .forEach(rest -> player.getWorld().dropItemNaturally(player.getLocation(), rest));
+        Location from = throwIt ? npcs.bodyLocation(npc.id()) : null;
+        if (from == null) {
+            player.getInventory().addItem(reward).values()
+                    .forEach(rest -> player.getWorld().dropItemNaturally(player.getLocation(), rest));
+        } else {
+            throwTo(player, from.add(0, 1.2, 0), reward);
+        }
         player.playSound(player.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 0.8f, 1.0f);
-        Messages.send(player, Messages.Type.SUCCESS, Component.text("Quest abgeschlossen! Deine Belohnung: "
-                + (reward.getAmount() > 1 ? reward.getAmount() + "× " : "")).append(rewardName));
+        Messages.send(player, Messages.Type.SUCCESS, Component.text("Quest abgeschlossen! Deine Belohnung"
+                + (from == null ? ": " : " fliegt dir zu: ") + (reward.getAmount() > 1 ? reward.getAmount() + "× " : "")).append(rewardName));
         if (npcs.artifacts().isArtifact(reward)) {
             smp.broadcast(Messages.message(Messages.Topic.SMP, Messages.Type.INFO, Component.text(player.getName()
                     + " hat von " + npc.title() + " ein Artefakt erhalten: ").append(rewardName)));
         }
-        return true;
+    }
+
+    /** The NPC tosses the reward to the player. Only that player can pick it up, and it neither burns nor despawns. */
+    private static void throwTo(Player player, Location from, ItemStack reward) {
+        Item drop = from.getWorld().dropItem(from, reward);
+        Vector toward = player.getEyeLocation().toVector().subtract(from.toVector());
+        if (toward.lengthSquared() > 0.01) {
+            toward.normalize().multiply(0.35);
+            toward.setY(toward.getY() + 0.2);
+            drop.setVelocity(toward);
+        }
+        drop.setOwner(player.getUniqueId());
+        drop.setPickupDelay(15);
+        drop.setInvulnerable(true);
+        drop.setUnlimitedLifetime(true);
+    }
+
+    /**
+     * A finished hand-in quest: the NPC takes the hand-in items the player dropped next to it. Only items thrown by
+     * that player count, only the quest's item, and never more than is still missing; the rest stays on the ground.
+     * What it has taken stays taken. With the last item the reward is thrown back.
+     */
+    private void deliveryTick() {
+        for (UUID uuid : List.copyOf(active.keySet())) {
+            Progress progress = active.get(uuid);
+            QuestSpec quest = progress == null ? null : spec(progress);
+            if (quest == null || quest.handIn() == null || progress.count < quest.amount()) continue;
+            Player player = Bukkit.getPlayer(uuid);
+            Location at = npcs.bodyLocation(progress.npc);
+            if (player == null || at == null || player.getWorld() != at.getWorld()) continue;
+            ItemStack wanted = new ItemStack(quest.handIn());
+            int taken = 0;
+            for (Entity entity : at.getWorld().getNearbyEntities(at, 3.5, 2.5, 3.5, nearby -> nearby instanceof Item)) {
+                Item item = (Item) entity;
+                ItemStack stack = item.getItemStack();
+                if (!uuid.equals(item.getThrower()) || !stack.isSimilar(wanted)) continue;
+                int missing = quest.amount() - progress.delivered - taken;
+                if (missing <= 0) break;
+                int take = Math.min(missing, stack.getAmount());
+                taken += take;
+                if (take == stack.getAmount()) {
+                    item.remove();
+                } else {
+                    stack.setAmount(stack.getAmount() - take);
+                    item.setItemStack(stack);
+                }
+                at.getWorld().spawnParticle(Particle.HAPPY_VILLAGER, item.getLocation().add(0, 0.3, 0), 4, 0.2, 0.2, 0.2);
+            }
+            if (taken == 0) continue;
+            progress.delivered += taken;
+            SmpNpc npc = npcs.find(progress.npc);
+            SmpNpc.Offer offer = npc == null ? null : npc.offer(progress.quest);
+            player.playSound(at, Sound.ENTITY_ITEM_PICKUP, 0.8f, 1.1f);
+            if (offer != null && progress.delivered >= quest.amount()) {
+                finish(player, npc, offer, true);
+                continue;
+            }
+            save();
+            player.sendActionBar(Component.text(progress.delivered + "/" + quest.amount() + " abgegeben", NamedTextColor.GREEN));
+            updateBar(player);
+        }
     }
 
     // ---------------------------------------------------------------- timer and boss bar
@@ -327,12 +415,16 @@ public final class QuestService implements Listener {
         }
         boolean ready = progress.count >= quest.amount();
         SmpNpc npc = npcs.find(progress.npc);
-        Component title = ready
+        Component title = ready && quest.handIn() != null
+                ? Component.text("Wirf " + (quest.amount() - progress.delivered) + "× ", NamedTextColor.GREEN)
+                        .append(SmpText.name(quest.handIn()))
+                        .append(Component.text(" vor " + (npc == null ? "deinem Auftraggeber" : npc.title()) + " auf den Boden", NamedTextColor.GREEN))
+                : ready
                 ? Component.text("Quest erfüllt! Zurück zu " + (npc == null ? "deinem Auftraggeber" : npc.title()), NamedTextColor.GREEN)
                 : Component.text(quest.text(), NamedTextColor.GOLD)
                         .append(Component.text("  " + progress.count + "/" + quest.amount(), NamedTextColor.WHITE))
                         .append(Component.text("  " + clock(progress.remainingSeconds), NamedTextColor.GRAY));
-        float share = ready ? 1.0f : Math.max(0f, Math.min(1f, progress.remainingSeconds / (quest.minutes() * 60f)));
+        float share = ready ? (quest.handIn() == null ? 1.0f : Math.max(0.05f, 1.0f - (float) progress.delivered / quest.amount())) : Math.max(0f, Math.min(1f, progress.remainingSeconds / (quest.minutes() * 60f)));
         BossBar.Color color = ready ? BossBar.Color.GREEN : share < 0.2f ? BossBar.Color.RED : BossBar.Color.YELLOW;
         BossBar bar = bars.get(player.getUniqueId());
         if (bar == null) {
@@ -384,8 +476,14 @@ public final class QuestService implements Listener {
         if (progress.count >= quest.amount()) {
             save();
             SmpNpc npc = npcs.find(progress.npc);
-            Messages.send(player, Messages.Type.SUCCESS, "Quest erfüllt! Kehre zu " + (npc == null ? "deinem Auftraggeber"
-                    : npc.title()) + " zurück und hol dir deine Belohnung. Die Zeit läuft nicht mehr.");
+            if (quest.handIn() != null) {
+                Messages.send(player, Messages.Type.SUCCESS, Component.text("Quest erfüllt! Kehre zu "
+                        + (npc == null ? "deinem Auftraggeber" : npc.title()) + " zurück. ")
+                        .append(handInHint(npc, quest, progress.delivered)).append(Component.text(" Die Zeit läuft nicht mehr.")));
+            } else {
+                Messages.send(player, Messages.Type.SUCCESS, "Quest erfüllt! Kehre zu " + (npc == null ? "deinem Auftraggeber"
+                        : npc.title()) + " zurück und hol dir deine Belohnung. Die Zeit läuft nicht mehr.");
+            }
             player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.8f, 1.0f);
         }
         updateBar(player);

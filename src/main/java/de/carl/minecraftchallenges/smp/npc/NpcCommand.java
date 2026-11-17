@@ -2,6 +2,7 @@ package de.carl.minecraftchallenges.smp.npc;
 
 import de.carl.minecraftchallenges.smp.SmpService;
 import de.carl.minecraftchallenges.smp.SmpText;
+import net.kyori.adventure.text.Component;
 import de.carl.minecraftchallenges.util.Messages;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
@@ -56,7 +57,13 @@ public final class NpcCommand implements CommandExecutor, TabCompleter {
         if (args.length > 0 && args[0].equalsIgnoreCase("cancel")) {
             boolean finished = progress.count() >= quest.amount();
             quests.cancel(player);
-            info(player, finished ? "Quest verworfen." : "Quest abgebrochen. " + giver + " gibt dir erst später wieder eine Aufgabe.");
+            info(player, finished ? "Quest verworfen." + (progress.delivered() > 0 ? " Was " + giver + " schon bekommen hat, bleibt dort." : "") : "Quest abgebrochen. " + giver + " gibt dir erst später wieder eine Aufgabe.");
+            return;
+        }
+        if (progress.count() >= quest.amount() && quest.handIn() != null) {
+            Messages.send(player, Messages.Type.SUCCESS, Component.text("Quest erfüllt: " + quest.text() + ". Wirf noch "
+                    + (quest.amount() - progress.delivered()) + "× ").append(SmpText.name(quest.handIn()))
+                    .append(Component.text(" vor " + giver + where(npc) + " auf den Boden.")));
             return;
         }
         if (progress.count() >= quest.amount()) {

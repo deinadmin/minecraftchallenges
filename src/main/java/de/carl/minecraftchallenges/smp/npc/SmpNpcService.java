@@ -50,6 +50,7 @@ import org.bukkit.generator.structure.StructurePiece;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.BoundingBox;
 
 import java.io.IOException;
@@ -58,6 +59,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -80,6 +82,8 @@ public final class SmpNpcService implements Listener {
     private static final double ROLE_HEIGHT = 2.17;
     private static final int CLAIM_MARGIN = 8;
     private static final int SCANS_PER_TICK = 4;
+    private static final long SAVE_DELAY_TICKS = 100;
+    private static final int WAKE_CHECK_TICKS = 10;
     private static final int MAX_OFFERS = 3;
     private static final double TRADER_ARTIFACT_CHANCE = 0.05;
     /** Blocks between a trader's roaming area and the nearest plot at the moment the trader appears. */
@@ -93,6 +97,13 @@ public final class SmpNpcService implements Listener {
     private static final float TURN_FIRST = 50f;
     /** A walk that takes longer than this many ticks is given up. */
     private static final int MAX_WALK_TICKS = 400;
+    /** The body's collision box: a little narrower than a player's so he fits through the doors villages have. */
+    private static final double HALF_WIDTH = 0.29;
+    private static final double BODY_HEIGHT = 1.8;
+    private static final double RISE_SPEED = 0.2;
+    private static final double FALL_SPEED = 0.3;
+    /** Ticks of being unable to move at all before he turns away. */
+    private static final int STUCK_LIMIT = 12;
     /** A menu keeps its trader still for this long unless it is closed, renewed while it is open. */
     private static final long HOLD_MILLIS = 10_000;
 
@@ -112,6 +123,7 @@ public final class SmpNpcService implements Listener {
         private double speed;
         private float yaw;
         private int walkTicks;
+        private int stuck;
 
         private Roam(Location home) {
             x = home.getX();
@@ -140,11 +152,15 @@ public final class SmpNpcService implements Listener {
     private List<SmpNpc> traderList = List.of();
     private final Map<String, ResolvableProfile> skins = new HashMap<>();
     private final Set<String> knownStructures = new HashSet<>();
-    private final Map<String, Set<Long>> scanned = new HashMap<>();
+    /** Chunks already looked at for structures this session; one bit per chunk, see {@link ChunkSet}. */
+    private final Map<String, ChunkSet> scanned = new HashMap<>();
     private final ArrayDeque<ChunkRef> scanQueue = new ArrayDeque<>();
     private BiConsumer<Player, SmpNpc> interaction = (player, npc) -> { };
     private long nextTraderAttempt = System.currentTimeMillis() + 120_000;
     private boolean structureErrorLogged;
+    private BukkitTask pendingSave;
+    private final Set<UUID> awake = new HashSet<>();
+    private int wakeCountdown;
     private boolean readOnly;
 
     public SmpNpcService(MinecraftChallengesPlugin plugin, SmpService smp, ItemValues values, ClaimService claims,
@@ -154,7 +170,7 @@ public final class SmpNpcService implements Listener {
         this.values = values;
         this.claims = claims;
         this.artifacts = artifacts;
-        this.rewards = new QuestRewards(artifacts);
+        this.rewards = new QuestRewards(artifacts, values);
         this.file = file;
         this.entityKey = new NamespacedKey(plugin, "smp_npc");
         loadSkins();
@@ -174,6 +190,12 @@ public final class SmpNpcService implements Listener {
 
     public SmpNpc find(UUID id) {
         return npcs.get(id);
+    }
+
+    /** Where the NPC's body stands right now, or null while it is not spawned. */
+    public Location bodyLocation(UUID id) {
+        Actors actor = actors.get(id);
+        return actor == null || !actor.body.isValid() ? null : actor.body.getLocation();
     }
 
     public List<SmpNpc> all() {
@@ -259,7 +281,7 @@ public final class SmpNpcService implements Listener {
         }
         SmpNpc npc = new SmpNpc(id, archetype, section.getString("world", ""), section.getDouble("x"),
                 section.getDouble("y"), section.getDouble("z"), section.getLong("expires"),
-                section.getString("structure"), stock, offers);
+                section.getString("structure"), stock, offers, boundsOf(section.getIntegerList("bounds")));
         ConfigurationSection bought = section.getConfigurationSection("bought");
         if (bought != null) {
             for (String player : bought.getKeys(false)) {
@@ -269,13 +291,33 @@ public final class SmpNpcService implements Listener {
         return npc;
     }
 
+    private static int[] boundsOf(List<Integer> list) {
+        if (list.size() != 6) return null;
+        return list.stream().mapToInt(Integer::intValue).toArray();
+    }
+
     private static ItemStack decode(Object encoded) {
         if (!(encoded instanceof String text)) return null;
         ItemStack[] items = SmpPlayerState.decode(text);
         return items.length == 0 || items[0] == null || items[0].isEmpty() ? null : items[0];
     }
 
+    /**
+     * Saves in a few seconds instead of now, and any number of calls until then share that one save. Writing the file
+     * means serialising every NPC and its reward items on the main thread, so what happens in bulk (discovering
+     * structures while players explore) must not do it every time. A crash only loses what a restart finds again.
+     */
+    private void saveSoon() {
+        if (readOnly || pendingSave != null) return;
+        pendingSave = plugin.getServer().getScheduler().runTaskLater(plugin, this::save, SAVE_DELAY_TICKS);
+    }
+
+    /** Saves right now, and with it whatever {@link #saveSoon()} was still waiting to write. */
     public void save() {
+        if (pendingSave != null) {
+            pendingSave.cancel();
+            pendingSave = null;
+        }
         if (readOnly) return;
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("structures", knownStructures.stream().sorted().toList());
@@ -288,6 +330,7 @@ public final class SmpNpcService implements Listener {
             yaml.set(path + ".z", npc.z());
             yaml.set(path + ".expires", npc.expiresAt());
             yaml.set(path + ".structure", npc.structure());
+            if (npc.bounds() != null) yaml.set(path + ".bounds", Arrays.stream(npc.bounds()).boxed().toList());
             List<Map<String, Object>> stock = new ArrayList<>();
             for (SmpNpc.Stock entry : npc.stock()) {
                 Map<String, Object> map = new LinkedHashMap<>();
@@ -313,6 +356,11 @@ public final class SmpNpcService implements Listener {
 
     /** After a backup restore: forget everything, read the restored file and rebuild the bodies. */
     public void reload() {
+        // A save that was still waiting would overwrite the file that was just restored.
+        if (pendingSave != null) {
+            pendingSave.cancel();
+            pendingSave = null;
+        }
         despawnAll();
         scanned.clear();
         scanQueue.clear();
@@ -321,6 +369,7 @@ public final class SmpNpcService implements Listener {
     }
 
     public void shutdown() {
+        if (pendingSave != null) save();
         despawnAll();
     }
 
@@ -343,23 +392,32 @@ public final class SmpNpcService implements Listener {
         return chunks.getOrDefault(chunkKey(chunkX, chunkZ), List.of());
     }
 
-    /** The NPC within {@code distance} blocks of the spot, or null. */
+    /** The NPC within {@code distance} blocks of the spot, or null. Walking NPCs count where they are now. */
     public SmpNpc near(Location location, double distance) {
         World world = location.getWorld();
-        if (world == null || !byChunk.containsKey(world.getName())) return null;
-        int chunkX = location.getBlockX() >> 4;
-        int chunkZ = location.getBlockZ() >> 4;
+        if (world == null) return null;
         SmpNpc best = null;
         double bestDistance = distance * distance;
+        for (Map.Entry<UUID, Roam> entry : roams.entrySet()) {
+            SmpNpc npc = npcs.get(entry.getKey());
+            if (npc == null || !npc.world().equals(world.getName())) continue;
+            Roam roam = entry.getValue();
+            double squared = square(roam.x - location.getX()) + square(roam.y - location.getY())
+                    + square(roam.z - location.getZ());
+            if (squared <= bestDistance) {
+                best = npc;
+                bestDistance = squared;
+            }
+        }
+        if (!byChunk.containsKey(world.getName())) return best;
+        int chunkX = location.getBlockX() >> 4;
+        int chunkZ = location.getBlockZ() >> 4;
         for (int dx = -1; dx <= 1; dx++) {
             for (int dz = -1; dz <= 1; dz++) {
                 for (SmpNpc npc : inChunk(world, chunkX + dx, chunkZ + dz)) {
-                    Roam roam = roams.get(npc.id());
-                    double nx = roam == null ? npc.x() : roam.x;
-                    double ny = roam == null ? npc.y() : roam.y;
-                    double nz = roam == null ? npc.z() : roam.z;
-                    double squared = square(nx - location.getX()) + square(ny - location.getY())
-                            + square(nz - location.getZ());
+                    if (roams.containsKey(npc.id())) continue;
+                    double squared = square(npc.x() - location.getX()) + square(npc.y() - location.getY())
+                            + square(npc.z() - location.getZ());
                     if (squared <= bestDistance) {
                         best = npc;
                         bestDistance = squared;
@@ -426,7 +484,7 @@ public final class SmpNpcService implements Listener {
     private void add(SmpNpc npc) {
         npcs.put(npc.id(), npc);
         rebuildIndex();
-        save();
+        saveSoon();
         spawn(npc);
     }
 
@@ -442,7 +500,7 @@ public final class SmpNpcService implements Listener {
         NpcArchetype archetype = npc.archetype();
         SmpNpc fresh = new SmpNpc(npc.id(), archetype, npc.world(), npc.x(), npc.y(), npc.z(), npc.expiresAt(),
                 npc.structure(), npc.trader() ? rollStock(archetype) : List.of(),
-                npc.trader() ? List.of() : rollOffers(archetype));
+                npc.trader() ? List.of() : rollOffers(archetype), npc.bounds());
         npcs.put(fresh.id(), fresh);
         rebuildIndex();
         save();
@@ -450,8 +508,13 @@ public final class SmpNpcService implements Listener {
     }
 
     public SmpNpc createQuestGiver(NpcArchetype archetype, Location location, String structure) {
+        return createQuestGiver(archetype, location, structure, null);
+    }
+
+    /** {@code bounds}: where he may walk (see {@link SmpNpc}), or null to have him stand still. */
+    public SmpNpc createQuestGiver(NpcArchetype archetype, Location location, String structure, int[] bounds) {
         SmpNpc npc = new SmpNpc(UUID.randomUUID(), archetype, location.getWorld().getName(), location.getX(),
-                location.getY(), location.getZ(), 0, structure, List.of(), rollOffers(archetype));
+                location.getY(), location.getZ(), 0, structure, List.of(), rollOffers(archetype), bounds);
         add(npc);
         return npc;
     }
@@ -463,12 +526,12 @@ public final class SmpNpcService implements Listener {
         List<SmpNpc.Offer> offers = new ArrayList<>();
         for (QuestSpec spec : specs) {
             if (offers.size() == MAX_OFFERS) break;
-            QuestRewards.Reward reward = rewards.roll(spec.tier(), random, archetype.name());
+            long cost = 0;
             if (spec.handIn() != null) {
                 ItemValues.Entry entry = values.entry(spec.handIn().name());
-                double cost = entry == null ? 0 : entry.value() * spec.amount();
-                if (reward.value() < cost * 1.5) continue;
+                cost = entry == null ? 0 : Math.round(entry.value() * spec.amount());
             }
+            QuestRewards.Reward reward = rewards.roll(spec, cost, random, archetype.name());
             offers.add(new SmpNpc.Offer(spec, reward.item(), reward.value()));
         }
         offers.sort(java.util.Comparator.comparingInt(offer -> offer.quest().tier()));
@@ -560,7 +623,7 @@ public final class SmpNpcService implements Listener {
         place(role, riding ? ROLE_HEIGHT - body.getHeight() : ROLE_HEIGHT);
         List<TextDisplay> labels = List.of(name, role);
         actors.put(npc.id(), new Actors(body, labels));
-        if (npc.trader()) roams.put(npc.id(), new Roam(location));
+        if (region(npc) != null) roams.put(npc.id(), new Roam(location));
     }
 
     private TextDisplay label(SmpNpc npc, Location location, float scale, Component text) {
@@ -626,8 +689,10 @@ public final class SmpNpcService implements Listener {
             Location eyes = body.getEyeLocation();
             Player nearest = null;
             double best = 36;
+            Location base = body.getLocation();
             for (Player player : body.getWorld().getPlayers()) {
-                double distance = player.getLocation().distanceSquared(body.getLocation());
+                double distance = square(player.getX() - base.getX()) + square(player.getY() - base.getY())
+                        + square(player.getZ() - base.getZ());
                 if (distance < best && player.getGameMode() != org.bukkit.GameMode.SPECTATOR) {
                     best = distance;
                     nearest = player;
@@ -649,6 +714,10 @@ public final class SmpNpcService implements Listener {
     /** Traders stroll around their home like villagers; they stand still while a menu is open. */
     private void roamTick() {
         if (roams.isEmpty()) return;
+        if (--wakeCountdown <= 0) {
+            wakeCountdown = WAKE_CHECK_TICKS;
+            refreshAwake();
+        }
         long now = System.currentTimeMillis();
         List<SmpNpc> lost = null;
         for (Map.Entry<UUID, Roam> entry : roams.entrySet()) {
@@ -663,6 +732,12 @@ public final class SmpNpcService implements Listener {
                     if (lost == null) lost = new ArrayList<>();
                     lost.add(npc);
                 }
+                continue;
+            }
+            if (!awake.contains(npc.id())) {
+                // Nobody around to see him: no steps, no collision checks, no teleports.
+                roam.moving = false;
+                roam.speed = 0;
                 continue;
             }
             Long holdUntil = held.get(npc.id());
@@ -683,22 +758,81 @@ public final class SmpNpcService implements Listener {
         if (lost != null) lost.forEach(this::spawn);
     }
 
+    /**
+     * Which walking NPCs have a player within {@code smp.npcs.wake-distance} blocks (0 = all of them); recomputed
+     * every few ticks. Walking NPCs further away stand still.
+     */
+    private void refreshAwake() {
+        awake.clear();
+        double distance = Math.max(0, plugin.getConfig().getDouble("smp.npcs.wake-distance", 64));
+        if (distance == 0) {
+            awake.addAll(roams.keySet());
+            return;
+        }
+        double limit = distance * distance;
+        for (Map.Entry<UUID, Roam> entry : roams.entrySet()) {
+            Actors actor = actors.get(entry.getKey());
+            if (actor == null) continue;
+            Roam roam = entry.getValue();
+            for (Player player : actor.body.getWorld().getPlayers()) {
+                double dx = player.getX() - roam.x;
+                double dy = player.getY() - roam.y;
+                double dz = player.getZ() - roam.z;
+                if (dx * dx + dy * dy + dz * dz <= limit) {
+                    awake.add(entry.getKey());
+                    break;
+                }
+            }
+        }
+    }
+
+    /** {minX, minY, minZ, maxX, maxY, maxZ} of where this NPC walks, or null if he stands still. */
+    private int[] region(SmpNpc npc) {
+        int[] bounds = npc.bounds();
+        if (bounds != null) return bounds;
+        if (!npc.trader()) return null;
+        int radius = roamRadius();
+        int x = (int) Math.floor(npc.x());
+        int y = (int) Math.floor(npc.y());
+        int z = (int) Math.floor(npc.z());
+        return new int[] {x - radius, y - radius, z - radius, x + radius, y + radius, z + radius};
+    }
+
+    /** Where a quest giver may walk: his structure's box, but never farther than a set distance from home. */
+    private int[] roamBounds(BoundingBox box, Location home) {
+        int cap = Math.max(4, plugin.getConfig().getInt("smp.npcs.quest-roam-radius", 24));
+        int x = home.getBlockX();
+        int y = home.getBlockY();
+        int z = home.getBlockZ();
+        return new int[] {
+                Math.min(x, Math.max((int) Math.floor(box.getMinX()), x - cap)),
+                Math.min(y, Math.max((int) Math.floor(box.getMinY()), y - 10)),
+                Math.min(z, Math.max((int) Math.floor(box.getMinZ()), z - cap)),
+                Math.max(x, Math.min((int) Math.ceil(box.getMaxX()) - 1, x + cap)),
+                Math.max(y, Math.min((int) Math.ceil(box.getMaxY()) - 1, y + 10)),
+                Math.max(z, Math.min((int) Math.ceil(box.getMaxZ()) - 1, z + cap))};
+    }
+
     private void walk(SmpNpc npc, Actors actor, Roam roam) {
         World world = actor.body.getWorld();
-        int radius = roamRadius();
+        int[] region = region(npc);
+        if (region == null) return;
         if (!roam.moving) {
             // Setting off from standing still: continue from wherever he was looking.
             roam.yaw = actor.body.getYaw();
             roam.speed = 0;
         }
         if (!roam.hasTarget) {
-            double homeX = Math.floor(npc.x()) + 0.5;
-            double homeZ = Math.floor(npc.z()) + 0.5;
+            // Stay a block clear of the edge, unless the box is too small for that.
+            double edgeX = Math.min(1.0, (region[3] - region[0]) / 2.0);
+            double edgeZ = Math.min(1.0, (region[5] - region[2]) / 2.0);
+            double lowX = region[0] + 0.5 + edgeX;
+            double highX = region[3] + 0.5 - edgeX;
+            double lowZ = region[2] + 0.5 + edgeZ;
+            double highZ = region[5] + 0.5 - edgeZ;
             for (int attempt = 0; attempt < 4 && !roam.hasTarget; attempt++) {
-                double targetX = Math.max(homeX - radius + 1, Math.min(homeX + radius - 1,
-                        roam.x + (random.nextDouble() * 2 - 1) * 7));
-                double targetZ = Math.max(homeZ - radius + 1, Math.min(homeZ + radius - 1,
-                        roam.z + (random.nextDouble() * 2 - 1) * 7));
+                double targetX = Math.max(lowX, Math.min(highX, roam.x + (random.nextDouble() * 2 - 1) * 7));
+                double targetZ = Math.max(lowZ, Math.min(highZ, roam.z + (random.nextDouble() * 2 - 1) * 7));
                 if (Math.hypot(targetX - roam.x, targetZ - roam.z) < 2.5 && attempt < 3) continue;
                 roam.targetX = targetX;
                 roam.targetZ = targetZ;
@@ -723,16 +857,34 @@ public final class SmpNpcService implements Listener {
             double radians = Math.toRadians(roam.yaw);
             double nextX = roam.x - Math.sin(radians) * roam.speed;
             double nextZ = roam.z + Math.cos(radians) * roam.speed;
-            int ground = groundAt(world, npc, nextX, nextZ, roam.groundY, radius);
+            int ground = groundAt(world, region, nextX, nextZ, roam.groundY);
             if (ground == Integer.MIN_VALUE) {
                 rest(roam, 20 + random.nextInt(40));
                 return;
             }
-            roam.groundY = ground;
-            roam.x = nextX;
-            roam.z = nextZ;
+            // Every move is tested with his real collision box. Steps up first rise in place beside the
+            // block, steps down start once his box has cleared the edge, so he never cuts into anything.
+            double nextY = roam.y + Math.max(-FALL_SPEED, Math.min(RISE_SPEED, ground - roam.y));
+            if (room(world, nextX, nextY, nextZ)) {
+                roam.x = nextX;
+                roam.y = nextY;
+                roam.z = nextZ;
+                roam.stuck = 0;
+            } else if (room(world, nextX, roam.y, nextZ)) {
+                roam.x = nextX;
+                roam.z = nextZ;
+                roam.stuck = 0;
+            } else if (nextY != roam.y && room(world, roam.x, nextY, roam.z)) {
+                roam.y = nextY;
+                roam.stuck = 0;
+            } else {
+                roam.speed = 0;
+                if (++roam.stuck > STUCK_LIMIT) rest(roam, 20 + random.nextInt(40));
+                return;
+            }
+            // The level he stands on, once he has settled on it; during a step the old one stays the reference.
+            if (Math.abs(roam.y - Math.rint(roam.y)) < 0.02) roam.groundY = (int) Math.rint(roam.y);
         }
-        roam.y += Math.max(-0.15, Math.min(0.15, roam.groundY - roam.y));
         roam.moving = true;
         // The tags ride along as passengers; one that failed to mount is moved by hand.
         actor.body.teleport(new Location(world, roam.x, roam.y, roam.z, roam.yaw, 0f));
@@ -758,23 +910,34 @@ public final class SmpNpcService implements Listener {
         return wrapped;
     }
 
+    /** True if his whole collision box fits at this spot without touching any block. */
+    private static boolean room(World world, double x, double y, double z) {
+        double[] edges = {-HALF_WIDTH, HALF_WIDTH};
+        for (double dx : edges) {
+            for (double dz : edges) {
+                if (!world.isChunkLoaded((int) Math.floor(x + dx) >> 4, (int) Math.floor(z + dz) >> 4)) return false;
+            }
+        }
+        BoundingBox box = new BoundingBox(x - HALF_WIDTH, y + 0.02, z - HALF_WIDTH,
+                x + HALF_WIDTH, y + BODY_HEIGHT, z + HALF_WIDTH);
+        return !world.hasCollisionsIn(box);
+    }
+
     /** The floor level to walk on at this spot, reached by at most a one-block step up or two down, or MIN_VALUE. */
-    private static int groundAt(World world, SmpNpc npc, double x, double z, int current, int radius) {
+    private static int groundAt(World world, int[] region, double x, double z, int current) {
         int blockX = (int) Math.floor(x);
         int blockZ = (int) Math.floor(z);
-        if (!world.isChunkLoaded(blockX >> 4, blockZ >> 4)) return Integer.MIN_VALUE;
+        if (blockX < region[0] || blockX > region[3] || blockZ < region[2] || blockZ > region[5]
+                || !world.isChunkLoaded(blockX >> 4, blockZ >> 4)) return Integer.MIN_VALUE;
         for (int y : new int[] {current + 1, current, current - 1, current - 2}) {
-            if (Math.abs(y - (int) Math.floor(npc.y())) <= radius && walkable(world, blockX, y, blockZ)) return y;
+            if (y >= region[1] && y <= region[4] && walkable(world, blockX, y, blockZ)) return y;
         }
         return Integer.MIN_VALUE;
     }
 
     /** Solid, harmless floor with room for a person above; grass and flowers do not get in the way. */
     private static boolean walkable(World world, int x, int y, int z) {
-        Block floor = world.getBlockAt(x, y - 1, z);
-        Material ground = floor.getType();
-        if (!ground.isSolid() || ground == Material.MAGMA_BLOCK || ground == Material.CACTUS
-                || ground == Material.CAMPFIRE || ground == Material.SOUL_CAMPFIRE) return false;
+        if (!fullBlock(world.getBlockAt(x, y - 1, z))) return false;
         return clear(world.getBlockAt(x, y, z)) && clear(world.getBlockAt(x, y + 1, z));
     }
 
@@ -860,6 +1023,18 @@ public final class SmpNpcService implements Listener {
 
     /** The quest giver standing on exactly this block; the rest of his structure stays breakable. */
     private SmpNpc questFloorAt(Block block) {
+        // A walking quest giver keeps the block under his feet wherever he is ...
+        for (Map.Entry<UUID, Roam> entry : roams.entrySet()) {
+            Roam roam = entry.getValue();
+            if (block.getX() != (int) Math.floor(roam.x) || block.getZ() != (int) Math.floor(roam.z)) continue;
+            // Mid-step he is between two levels: both blocks under him stay.
+            int low = (int) Math.floor(roam.y + 0.01) - 1;
+            int high = (int) Math.ceil(roam.y - 0.01) - 1;
+            if (block.getY() != low && block.getY() != high && block.getY() != roam.groundY - 1) continue;
+            SmpNpc npc = npcs.get(entry.getKey());
+            if (npc != null && !npc.trader() && npc.world().equals(block.getWorld().getName())) return npc;
+        }
+        // ... and the block at home stays too, so he is never put back onto thin air.
         for (SmpNpc npc : inChunk(block.getWorld(), block.getX() >> 4, block.getZ() >> 4)) {
             if (!npc.trader() && (int) Math.floor(npc.x()) == block.getX() && (int) Math.floor(npc.z()) == block.getZ()
                     && (int) Math.floor(npc.y()) - 1 == block.getY()) {
@@ -934,7 +1109,7 @@ public final class SmpNpcService implements Listener {
 
     private void queueScan(World world, int chunkX, int chunkZ) {
         if (readOnly || !questGiversEnabled()) return;
-        if (scanned.computeIfAbsent(world.getName(), name -> new HashSet<>()).add(chunkKey(chunkX, chunkZ))) {
+        if (scanned.computeIfAbsent(world.getName(), name -> new ChunkSet()).add(chunkX, chunkZ)) {
             scanQueue.add(new ChunkRef(world.getName(), chunkX, chunkZ));
         }
     }
@@ -945,8 +1120,8 @@ public final class SmpNpcService implements Listener {
             World world = plugin.getServer().getWorld(ref.world);
             if (world == null || !world.isChunkLoaded(ref.x, ref.z)) {
                 // Not looked at after all; the next load queues it again.
-                Set<Long> seen = scanned.get(ref.world);
-                if (seen != null) seen.remove(chunkKey(ref.x, ref.z));
+                ChunkSet seen = scanned.get(ref.world);
+                if (seen != null) seen.remove(ref.x, ref.z);
                 continue;
             }
             try {
@@ -972,13 +1147,13 @@ public final class SmpNpcService implements Listener {
             if (knownStructures.contains(key)) continue;
             if (Math.floorMod(key.hashCode(), 100) >= archetype.chance()) {
                 knownStructures.add(key);
-                save();
+                saveSoon();
                 continue;
             }
             Location spot = findSpot(world, chunk, structure, archetype);
             if (spot == null) continue;
             knownStructures.add(key);
-            createQuestGiver(archetype, spot, key);
+            createQuestGiver(archetype, spot, key, archetype.roams() ? roamBounds(box, spot) : null);
             plugin.getLogger().info("[SMP] Quest-NPC " + archetype.name() + " steht jetzt bei " + spot.getBlockX() + ", "
                     + spot.getBlockY() + ", " + spot.getBlockZ() + " (" + world.getName() + ").");
         }
@@ -1018,9 +1193,25 @@ public final class SmpNpcService implements Listener {
     }
 
     private static boolean canStand(World world, int x, int y, int z, boolean underwater) {
-        Block floor = world.getBlockAt(x, y - 1, z);
-        if (!floor.getType().isSolid() || floor.getType() == Material.MAGMA_BLOCK) return false;
+        if (!fullBlock(world.getBlockAt(x, y - 1, z))) return false;
         return free(world.getBlockAt(x, y, z), underwater) && free(world.getBlockAt(x, y + 1, z), underwater);
+    }
+
+    /**
+     * A real block to stand on: its collision fills the whole block up to the top edge. That rules out liquids,
+     * pointed dripstone, slabs, stairs, fences, walls, carpets, soul sand and the like; paths and farmland
+     * (a sixteenth lower) still count.
+     */
+    private static boolean fullBlock(Block block) {
+        Material type = block.getType();
+        if (!type.isSolid() || block.isLiquid() || type == Material.MAGMA_BLOCK) return false;
+        double volume = 0;
+        double top = 0;
+        for (BoundingBox box : block.getCollisionShape().getBoundingBoxes()) {
+            volume += box.getVolume();
+            top = Math.max(top, box.getMaxY());
+        }
+        return volume >= 0.9 && top >= 0.93 && top <= 1.01;
     }
 
     private static boolean free(Block block, boolean underwater) {
@@ -1046,24 +1237,51 @@ public final class SmpNpcService implements Listener {
         trySpawnTrader(6);
     }
 
+    /** Looks near the spawn first; only if that finds nothing at all, it looks farther out. */
     private void trySpawnTrader(int attempts) {
-        if (attempts <= 0) return;
+        trySpawnTrader(attempts, false);
+    }
+
+    private void trySpawnTrader(int attempts, boolean fallback) {
+        if (attempts <= 0) {
+            if (!fallback) {
+                plugin.getLogger().info("[SMP] Kein Platz für einen Händler im bevorzugten Bereich; suche weiter außen.");
+                trySpawnTrader(6, true);
+            }
+            return;
+        }
         World world = smp.overworld();
         Location spawn = world.getSpawnLocation();
         int min = Math.max(smp.spawnRadius() + 50, plugin.getConfig().getInt("smp.npcs.traders.min-distance", 250));
         int max = Math.max(min + 100, plugin.getConfig().getInt("smp.npcs.traders.max-distance", 2500));
-        double angle = random.nextDouble() * Math.PI * 2;
-        double distance = min + random.nextDouble() * (max - min);
-        int x = spawn.getBlockX() + (int) Math.round(Math.cos(angle) * distance);
-        int z = spawn.getBlockZ() + (int) Math.round(Math.sin(angle) * distance);
-        if (!world.getWorldBorder().isInside(new Location(world, x, 64, z)) || !areaFree(world, x, z)) {
-            trySpawnTrader(attempts - 1);
+        int from = fallback ? max : min;
+        int to = fallback
+                ? Math.max(max + 500, plugin.getConfig().getInt("smp.npcs.traders.fallback-max-distance", 7500))
+                : max;
+        int roam = roamRadius();
+        int[] spot = null;
+        // Spots outside the world border or next to plots cost nothing; only real chunk checks use up an attempt.
+        for (int sample = 0; sample < 40 && spot == null; sample++) {
+            double angle = random.nextDouble() * Math.PI * 2;
+            double distance = from + random.nextDouble() * (to - from);
+            int x = spawn.getBlockX() + (int) Math.round(Math.cos(angle) * distance);
+            int z = spawn.getBlockZ() + (int) Math.round(Math.sin(angle) * distance);
+            if (world.getWorldBorder().isInside(new Location(world, x - roam, 64, z - roam))
+                    && world.getWorldBorder().isInside(new Location(world, x + roam, 64, z + roam))
+                    && areaFree(world, x, z)) {
+                spot = new int[] {x, z};
+            }
+        }
+        if (spot == null) {
+            trySpawnTrader(0, fallback);
             return;
         }
+        int x = spot[0];
+        int z = spot[1];
         world.getChunkAtAsync(x >> 4, z >> 4, true, chunk -> {
             int y = world.getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES) + 1;
             if (y >= world.getMaxHeight() - 2 || !walkable(world, x, y, z) || !areaFree(world, x, z)) {
-                trySpawnTrader(attempts - 1);
+                trySpawnTrader(attempts - 1, fallback);
                 return;
             }
             int minHours = plugin.getConfig().getInt("smp.npcs.traders.lifetime-hours-min", 24);

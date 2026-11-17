@@ -54,6 +54,8 @@ public final class SmpServerSmoke extends JavaPlugin {
         Bukkit.getScheduler().runTask(this, () -> {
             try {
                 MinecraftChallengesPlugin plugin = (MinecraftChallengesPlugin) getServer().getPluginManager().getPlugin("MinecraftChallenges");
+                // No player is online here, so NPCs would never wake; tests that watch them walk need them awake.
+                plugin.getConfig().set("smp.npcs.wake-distance", 0);
                 smp = (SmpService) field(plugin, "smp");
                 features = field(plugin, "smpFeatures");
                 expect(smp != null && features != null, "The SMP and its features start");
@@ -65,7 +67,7 @@ public final class SmpServerSmoke extends JavaPlugin {
                 artifacts();
                 npcs();
                 claims();
-                structures().thenCompose(ignored -> traders()).whenComplete((ignored, error) -> finish(error));
+                structures().thenCompose(ignored -> traders()).thenCompose(ignored -> walkingQuestGiver()).whenComplete((ignored, error) -> finish(error));
             } catch (Throwable error) {
                 finish(error);
             }
@@ -141,13 +143,24 @@ public final class SmpServerSmoke extends JavaPlugin {
             if (body == null) throw new AssertionError(archetype.key() + " has no body");
             if (body.getProfile().properties().isEmpty()) throw new AssertionError(archetype.key() + " has no skin");
             if (!body.isInvulnerable() || body.isPersistent()) throw new AssertionError(archetype.key() + " is not protected or would be saved");
-            // The debris quest only appears next to a reward that is clearly worth more than the debris.
+            // Quests that take items away always pay clearly more than those items are worth.
             SmpNpc current = npc;
             for (int roll = 0; roll < 40; roll++) {
                 current = npcs.reroll(current);
                 for (SmpNpc.Offer offer : current.offers()) {
-                    if (offer.quest().handIn() != null && offer.rewardValue() < 3600) {
-                        throw new AssertionError("Debris quest for a reward worth only " + offer.rewardValue());
+                    // Rewards follow the quest: the shortest quest of a tier still pays 75 % of 75 % of the tier budget.
+                    long floor = switch (offer.quest().tier()) { case 1 -> 330; case 2 -> 840; default -> 2500; };
+                    if (offer.rewardValue() < floor) {
+                        throw new AssertionError(offer.quest().id() + " (tier " + offer.quest().tier() + ") pays only "
+                                + offer.rewardValue() + ": " + offer.reward().getType());
+                    }
+                    if (offer.quest().handIn() != null) {
+                        var entry = ((ItemValues) field(npcs, "values")).entry(offer.quest().handIn().name());
+                        if (entry == null) throw new AssertionError(offer.quest().id() + " hands in an item without a value");
+                        double cost = entry.value() * offer.quest().amount();
+                        if (offer.rewardValue() < cost * 1.5) {
+                            throw new AssertionError(offer.quest().id() + " takes " + cost + " coins of items for a reward worth only " + offer.rewardValue());
+                        }
                     }
                 }
             }
@@ -271,6 +284,13 @@ public final class SmpServerSmoke extends JavaPlugin {
                     for (int y = 200; y <= 203; y++) world.getBlockAt(x, y, z).setType(Material.AIR);
                 }
             }
+            // Pillars to walk around and a one-block step to climb, so a body cutting into blocks gets caught.
+            for (int[] pillar : new int[][] {{3, 0}, {-3, 2}, {0, -4}, {5, 5}, {-6, -5}, {-2, 7}}) {
+                for (int y = 200; y <= 202; y++) world.getBlockAt(cx + pillar[0], y, cz + pillar[1]).setType(Material.STONE);
+            }
+            for (int x = cx + 6; x <= cx + 8; x++) {
+                for (int z = cz - 3; z <= cz - 1; z++) world.getBlockAt(x, 200, z).setType(Material.STONE);
+            }
             for (int chunkX = (cx - 14) >> 4; chunkX <= (cx + 14) >> 4; chunkX++) {
                 for (int chunkZ = (cz - 14) >> 4; chunkZ <= (cz + 14) >> 4; chunkZ++) {
                     world.getChunkAt(chunkX, chunkZ).addPluginChunkTicket(this);
@@ -307,6 +327,7 @@ public final class SmpServerSmoke extends JavaPlugin {
                             .findFirst().orElse(null);
                     if (body == null) throw new AssertionError("The trader has no body");
                     Location now = body.getLocation();
+                    noClip(world, body);
                     if (Math.abs(now.getX() - (cx + 0.5)) > 10.6 || Math.abs(now.getZ() - (cz + 0.5)) > 10.6) {
                         throw new AssertionError("The trader left his area: " + now);
                     }
@@ -363,6 +384,107 @@ public final class SmpServerSmoke extends JavaPlugin {
             done.completeExceptionally(error);
         }
         return done;
+    }
+
+    /** A quest giver with a box strolls inside it, and the block under his feet follows him. */
+    private CompletableFuture<Void> walkingQuestGiver() {
+        CompletableFuture<Void> done = new CompletableFuture<>();
+        try {
+            SmpNpcService npcs = (SmpNpcService) field(features, "npcs");
+            World world = smp.overworld();
+            Location spawn = world.getSpawnLocation();
+            int cx = spawn.getBlockX() + 700;
+            int cz = spawn.getBlockZ() + 700;
+            expect(NpcArchetype.get("village").roams() && NpcArchetype.get("fortress").roams()
+                            && !NpcArchetype.get("desert_pyramid").roams() && !NpcArchetype.get("ruined_portal").roams(),
+                    "Villages and fortresses roam; trapped or lava structures keep their quest giver still");
+            java.lang.reflect.Method canStand = SmpNpcService.class.getDeclaredMethod("canStand",
+                    World.class, int.class, int.class, int.class, boolean.class);
+            canStand.setAccessible(true);
+            int sx = cx + 12;
+            int sz = cz + 12;
+            boolean stone = (boolean) canStand.invoke(null, world, sx, 200, sz, false);
+            record Floor(Material material, String name) { }
+            for (Floor floor : List.of(new Floor(Material.POINTED_DRIPSTONE, "pointed dripstone"),
+                    new Floor(Material.STONE_SLAB, "a slab"), new Floor(Material.OAK_FENCE, "a fence"),
+                    new Floor(Material.WATER, "water"), new Floor(Material.LAVA, "lava"),
+                    new Floor(Material.MAGMA_BLOCK, "magma"), new Floor(Material.SOUL_SAND, "soul sand"))) {
+                world.getBlockAt(sx, 199, sz).setType(floor.material());
+                if ((boolean) canStand.invoke(null, world, sx, 200, sz, false)) throw new AssertionError("A spot on " + floor.name() + " is accepted");
+            }
+            world.getBlockAt(sx, 199, sz).setType(Material.DIRT_PATH);
+            boolean path = (boolean) canStand.invoke(null, world, sx, 200, sz, false);
+            world.getBlockAt(sx, 199, sz).setType(Material.STONE);
+            expect(stone && path, "NPCs are placed on stone and paths, but never on liquids, dripstone, slabs, fences, magma or soul sand");
+            int[] bounds = {cx - 9, 200, cz - 9, cx + 9, 203, cz + 9};
+            SmpNpc giver = npcs.createQuestGiver(NpcArchetype.get("village"), new Location(world, cx + 0.5, 200, cz + 0.5),
+                    "smoke", bounds);
+            expect(giver.bounds() != null && giver.bounds()[0] == cx - 9, "The quest giver remembers his box");
+            Location start = new Location(world, cx + 0.5, 200, cz + 0.5);
+            // With the real wake distance and nobody near, he must not take a single step.
+            getServer().getPluginManager().getPlugin("MinecraftChallenges").getConfig().set("smp.npcs.wake-distance", 64);
+            int[] frozen = {0};
+            int[] ticks = {0};
+            boolean[] moved = {false};
+            double[] farthest = {0};
+            Bukkit.getScheduler().runTaskTimer(this, task -> {
+                try {
+                    Mannequin body = world.getEntitiesByClass(Mannequin.class).stream()
+                            .filter(m -> m.isValid() && Math.abs(m.getX() - cx) < 20 && Math.abs(m.getZ() - cz) < 20)
+                            .findFirst().orElse(null);
+                    if (body == null) throw new AssertionError("The quest giver has no body");
+                    Location now = body.getLocation();
+                    noClip(world, body);
+                    if (now.getX() < cx - 9 || now.getX() > cx + 10 || now.getZ() < cz - 9 || now.getZ() > cz + 10) {
+                        throw new AssertionError("The quest giver left his box: " + now);
+                    }
+                    if (frozen[0] < 200) {
+                        if (now.distance(start) > 0.01) throw new AssertionError("The quest giver walked with nobody near: " + now);
+                        if (++frozen[0] == 200) {
+                            expect(true, "Walking NPCs stand still while no player is within the wake distance");
+                            getServer().getPluginManager().getPlugin("MinecraftChallenges").getConfig().set("smp.npcs.wake-distance", 0);
+                        }
+                        return;
+                    }
+                    ticks[0]++;
+                    farthest[0] = Math.max(farthest[0], now.distance(start));
+                    if (!moved[0]) {
+                        if (ticks[0] > 1200) throw new AssertionError("The quest giver never walked");
+                        if (now.distance(start) <= 1.5) return;
+                        moved[0] = true;
+                        ticks[0] = 0;
+                        expect(true, "The quest giver strolls around inside his box");
+                    int bx = now.getBlockX();
+                    int bz = now.getBlockZ();
+                    BlockBurnEvent under = new BlockBurnEvent(world.getBlockAt(bx, 199, bz), null);
+                    int farX = bx > cx ? bx - 3 : bx + 3;
+                    BlockBurnEvent away = new BlockBurnEvent(world.getBlockAt(farX, 199, bz), null);
+                    Bukkit.getPluginManager().callEvent(under);
+                    Bukkit.getPluginManager().callEvent(away);
+                    expect(under.isCancelled() && !away.isCancelled(), "The block under his feet is protected, the ones around it are not");
+                        return;
+                    }
+                    // Keep watching for 40 seconds: around pillars and over a one-block step he must never cut into a block.
+                    if (ticks[0] < 800) return;
+                    task.cancel();
+                    expect(farthest[0] > 3, "In 40 seconds he walked up to " + Math.round(farthest[0]) + " blocks from home and never cut into a block");
+                    npcs.remove(giver);
+                    done.complete(null);
+                } catch (Throwable error) {
+                    task.cancel();
+                    done.completeExceptionally(error);
+                }
+            }, 1L, 1L);
+        } catch (Throwable error) {
+            done.completeExceptionally(error);
+        }
+        return done;
+    }
+
+    /** The body must never overlap a block, not even by a sliver. */
+    private static void noClip(World world, Mannequin body) {
+        org.bukkit.util.BoundingBox box = body.getBoundingBox().expand(-0.03);
+        if (world.hasCollisionsIn(box)) throw new AssertionError("The NPC cut into a block at " + body.getLocation());
     }
 
     private void finish(Throwable error) {
