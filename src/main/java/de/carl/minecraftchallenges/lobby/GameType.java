@@ -12,7 +12,9 @@ public enum GameType {
     SPONGE("sponge-world", "Schwammwelt", Material.SPONGE,
             "Minecraft durchspielen – Gras und Erde sind Schwämme"),
     CUSTOM("custom", "Eigene Challenges", Material.WRITABLE_BOOK,
-            "Eigene Regeln, eigenes Ziel – erstellt von Spielern");
+            "Eigene Regeln, eigenes Ziel – erstellt von Spielern"),
+    SPEEDRUN("speedrun", "Solo-Speedrun", Material.CLOCK,
+            "Besiege den Enderdrachen in einer neuen Welt");
 
     private final String key;
     private final String displayName;

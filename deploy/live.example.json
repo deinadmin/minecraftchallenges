@@ -1,0 +1,14 @@
+{
+  "name": "kinetic-live",
+  "host": "YOUR-SFTP-HOST.kineticpanel.net",
+  "port": 2022,
+  "username": "YOUR-SFTP-USERNAME",
+  "remote_root": "/",
+  "server_jar": "server.jar",
+  "minecraft_port": null,
+  "private_key": null,
+  "panel": {
+    "url": "https://kineticpanel.net",
+    "server_id": "YOUR-SERVER-ID"
+  }
+}

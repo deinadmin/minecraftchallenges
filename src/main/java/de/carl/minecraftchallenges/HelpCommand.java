@@ -98,6 +98,8 @@ public final class HelpCommand implements CommandExecutor, Listener {
                     "/challenge stop", sender instanceof Player
                             ? "Beendet die laufende Challenge in dieser Lobby"
                             : "Beendet alle laufenden Challenges");
+            add(entries, sender, true, KeepAliveCommand.PERMISSION, true,
+                    "/keepalive", "Hält die laufende Runde offen, auch wenn alle Spieler gehen");
         }
         add(entries, sender, false, "minecraftchallenges.command.reload", true,
                 "/challenge reload", "Lädt die Konfiguration neu");
@@ -112,19 +114,31 @@ public final class HelpCommand implements CommandExecutor, Listener {
         add(entries, sender, true, null, false, "/spawn", "Teleportiert dich nach 3 Sekunden zum SMP-Spawn");
         add(entries, sender, true, null, false, "/sethome", "Setzt dein Zuhause an deiner Position");
         add(entries, sender, true, null, false, "/home", "Teleportiert dich zu deinem Zuhause");
+        add(entries, sender, true, null, false, "/tpa <Spieler>", "Fragt, ob du dich zu einem Spieler teleportieren darfst");
+        add(entries, sender, true, null, false, "/tpaccept, /tpdeny", "Nimmt eine Teleportanfrage an oder lehnt sie ab");
         add(entries, sender, true, null, false, "/pay <Spieler> <Betrag>", "Überweist einem Spieler Geld");
         add(entries, sender, false, null, false,
                 sender instanceof Player ? "/money [Spieler]" : "/money <Spieler>", "Zeigt einen Kontostand");
         if (!editing) {
-            add(entries, sender, true, null, false, "/shop", "Öffnet den Shop für nützliche Items");
+            add(entries, sender, true, null, false, "/shop", "Tagesangebote: jeden Tag um 0 Uhr neue Items");
+            add(entries, sender, true, null, false, "/sell", "Verkauft Items zum aktuellen Marktpreis");
         }
+        add(entries, sender, true, null, false, "/prices", "Zeigt die Marktpreise und heute gesuchte Items");
+        if (!editing) {
+        }
+        add(entries, sender, true, null, false, "/claim", "Grundstücke: kaufen, vergrößern, Freunden vertrauen");
+        add(entries, sender, true, null, false, "/quest", "Zeigt deine laufende Quest; /quest cancel bricht sie ab");
         add(entries, sender, true, null, false, "/ec", "Öffnet deine Endertruhe von überall im SMP");
         add(entries, sender, true, SmpCommands.EC_OTHERS_PERMISSION, true,
                 "/ec <Spieler>", "Öffnet die SMP-Endertruhe eines Spielers (auch offline)");
         add(entries, sender, true, "minecraftchallenges.command.edit", true,
                 "/edit", "Kreativ-Bearbeitungsmodus im SMP mit eigenem Inventar");
-        add(entries, sender, true, ShopMenu.EDIT_PERMISSION, true,
-                "/shop edit", "Shop-Editor: Items, Preise und Mengen per GUI");
+        add(entries, sender, true, ShopMenu.SHUFFLE_PERMISSION, true,
+                "/shop shuffle", "Mischt die Tagesangebote sofort neu");
+        add(entries, sender, true, "minecraftchallenges.command.claim-admin", true,
+                "/claim delete", "Löscht das Grundstück, auf dem du stehst");
+        add(entries, sender, true, "minecraftchallenges.command.smpnpc", true,
+                "/smpnpc", "Wanderhändler und Quest-NPCs setzen, neu auswürfeln, entfernen");
         add(entries, sender, true, SmpCommands.SETSPAWN_PERMISSION, true,
                 "/setspawn", "Setzt den SMP-Spawn; der Spawnschutz wandert mit");
         if (sender.hasPermission(BackupCommand.PERMISSION)) {

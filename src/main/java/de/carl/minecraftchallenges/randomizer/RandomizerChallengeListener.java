@@ -4,11 +4,16 @@ import com.destroystokyo.paper.event.block.BlockDestroyEvent;
 import de.carl.minecraftchallenges.MinecraftChallengesPlugin;
 import de.carl.minecraftchallenges.lobby.GameLobbyRegistry;
 import de.carl.minecraftchallenges.util.LobbyService;
+import de.carl.minecraftchallenges.util.ReadyClickGate;
 import io.papermc.paper.event.block.BlockBreakBlockEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.Location;
+import org.bukkit.event.player.PlayerTeleportEvent;
+import de.carl.minecraftchallenges.util.Messages;
+import java.util.UUID;
 import org.bukkit.block.Block;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Enemy;
@@ -53,10 +58,12 @@ import java.util.Set;
 
 public final class RandomizerChallengeListener implements Listener {
     private final LobbyService lobby;
+    private final ReadyClickGate readyClicks = new ReadyClickGate();
     private final MinecraftChallengesPlugin plugin;
     private final GameLobbyRegistry registry;
     private final Set<DropKey> droppedThisTick = new HashSet<>();
     private boolean dropCleanupScheduled;
+    private final Set<UUID> portalTransfers = new HashSet<>();
 
     public RandomizerChallengeListener(MinecraftChallengesPlugin plugin, LobbyService lobby,
                                        GameLobbyRegistry registry) {
@@ -80,7 +87,8 @@ public final class RandomizerChallengeListener implements Listener {
             case RIGHT_CLICK_AIR, RIGHT_CLICK_BLOCK -> {
                 if (challenge.isBack(event.getItem())) lobby.sendToLobby(event.getPlayer());
                 else if (challenge.isAdmin(event.getItem())) challenge.openAdmin(event.getPlayer());
-                else if (challenge.isReady(event.getItem())) challenge.toggleReady(event.getPlayer());
+                else if (challenge.isReady(event.getItem()) && readyClicks.accept(event.getPlayer().getUniqueId(),
+                        event.getHand(), Bukkit.getCurrentTick())) challenge.toggleReady(event.getPlayer());
                 else if (challenge.isSkip(event.getItem())) challenge.useSkip(event.getPlayer());
             }
             default -> { }
@@ -222,19 +230,45 @@ public final class RandomizerChallengeListener implements Listener {
         if (challenge != null) challenge.dragonDefeated();
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPortal(PlayerPortalEvent event) {
         RandomizerChallenge challenge = challengeForWorld(event.getFrom().getWorld());
         if (challenge == null || !challenge.type().beatMinecraft() || !challenge.isRunning()) return;
-        if (event.getTo() == null || event.getTo().getWorld() == null) return;
-        World.Environment destination = event.getTo().getWorld().getEnvironment();
-        World target = switch (destination) {
-            case NETHER -> challenge.nether();
-            case THE_END -> challenge.end();
-            default -> challenge.overworld();
-        };
-        if (target == null) return;
-        event.setTo(target.getSpawnLocation().add(0.5, 1, 0.5));
+        World.Environment destination;
+        if (event.getCause() == PlayerTeleportEvent.TeleportCause.NETHER_PORTAL) {
+            destination = event.getFrom().getWorld().getEnvironment() == World.Environment.NETHER
+                    ? World.Environment.NORMAL : World.Environment.NETHER;
+        } else if (event.getCause() == PlayerTeleportEvent.TeleportCause.END_PORTAL) {
+            destination = event.getFrom().getWorld().getEnvironment() == World.Environment.THE_END
+                    ? World.Environment.NORMAL : World.Environment.THE_END;
+        } else return;
+        World ready = challenge.readyPortalWorld(destination);
+        if (ready != null) {
+            event.setTo(ready.getSpawnLocation().add(0.5, 1, 0.5));
+            return;
+        }
+        event.setCancelled(true);
+        Player player = event.getPlayer();
+        UUID uuid = player.getUniqueId();
+        if (!portalTransfers.add(uuid)) return;
+        Messages.send(player, Messages.Type.INFO, "Die Dimension wird für das Portal vorbereitet …");
+        Location source = event.getFrom().clone();
+        challenge.portalTarget(destination).whenComplete((target, error) -> {
+            if (error != null) {
+                plugin.getLogger().warning("Portal-Ziel konnte nicht geladen werden: " + error.getMessage());
+                if (player.isOnline()) Messages.send(player, Messages.Type.ERROR, "Das Portal-Ziel konnte nicht vorbereitet werden.");
+            }
+            if (target == null || !player.isOnline() || !challenge.isRunning()
+                    || player.getWorld() != source.getWorld()
+                    || player.getLocation().distanceSquared(source) > 16) {
+                portalTransfers.remove(uuid);
+                return;
+            }
+            // Retry through vanilla while the player remains in the portal. This preserves portal
+            // search/creation and the End platform instead of replacing them with a plain teleport.
+            portalTransfers.remove(uuid);
+            player.setPortalCooldown(0);
+        });
     }
 
     @EventHandler
@@ -303,17 +337,8 @@ public final class RandomizerChallengeListener implements Listener {
 
     @EventHandler
     public void onRespawn(PlayerRespawnEvent event) {
-        World deathWorld = event.getPlayer().getWorld();
-        RandomizerChallenge challenge = challengeForWorld(deathWorld);
-        // Deaths in worlds outside the network (e.g. the SMP) are none of the randomizer's business.
-        if (challenge == null && !lobby.isLobbyWorld(deathWorld) && registry.instance(deathWorld) == null) return;
-        if (challenge == null || !challenge.isParticipant(event.getPlayer())) {
-            challenge = registry.randomizers()
-                    .filter(candidate -> candidate.isParticipant(event.getPlayer()))
-                    .filter(candidate -> candidate.overworld() != null)
-                    .findFirst().orElse(null);
-        }
-        if (challenge == null || challenge.overworld() == null) return;
+        RandomizerChallenge challenge = challengeForWorld(event.getPlayer().getWorld());
+        if (challenge == null || challenge.overworld() == null || !challenge.isParticipant(event.getPlayer())) return;
         event.setRespawnLocation(challenge.overworld().getSpawnLocation());
         challenge.respawn(event.getPlayer());
     }
@@ -328,8 +353,9 @@ public final class RandomizerChallengeListener implements Listener {
 
     @EventHandler public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        readyClicks.forget(player.getUniqueId());
         registry.randomizers()
-                .filter(challenge -> challenge.ownsWorld(player.getWorld()) || challenge.isParticipant(player))
+                .filter(challenge -> challenge.ownsWorld(player.getWorld()))
                 .forEach(challenge -> challenge.playerLeft(player));
     }
 

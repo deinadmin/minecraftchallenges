@@ -1,0 +1,5 @@
+name: PerformanceServerSmoke
+version: '1.0'
+main: de.carl.minecraftchallenges.smoke.PerformanceServerSmoke
+api-version: '26.3'
+depend: [MinecraftChallenges]

@@ -54,10 +54,12 @@ public record PlayerSnapshot(
         player.getInventory().setArmorContents(copy(armorContents));
         player.getInventory().setExtraContents(copy(extraContents));
         player.getInventory().setHeldItemSlot(Math.max(0, Math.min(8, heldSlot)));
+        player.getActivePotionEffects().forEach(effect -> player.removePotionEffect(effect.getType()));
+        player.addPotionEffects(potionEffects);
         AttributeInstance attribute = maxHealthAttribute(player);
         if (attribute != null) attribute.setBaseValue(Math.max(1.0, maxHealth));
         double maximum = attribute == null ? 20.0 : attribute.getValue();
-        player.setHealth(Math.max(0.1, Math.min(maximum, health)));
+        player.setHealth(Math.min(maximum, health));
         player.setAbsorptionAmount(Math.max(0.0, absorption));
         player.setFoodLevel(Math.max(0, Math.min(20, foodLevel)));
         player.setSaturation(Math.max(0.0f, Math.min(saturation, player.getFoodLevel())));
@@ -68,8 +70,6 @@ public record PlayerSnapshot(
         player.setRemainingAir(Math.max(0, Math.min(player.getMaximumAir(), remainingAir)));
         player.setFireTicks(fireTicks);
         player.setFallDistance(Math.max(0.0f, fallDistance));
-        player.getActivePotionEffects().forEach(effect -> player.removePotionEffect(effect.getType()));
-        player.addPotionEffects(potionEffects);
     }
 
     private static AttributeInstance maxHealthAttribute(Player player) {

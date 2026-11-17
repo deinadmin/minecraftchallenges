@@ -1,12 +1,15 @@
 package de.carl.minecraftchallenges.menu;
 
 import de.carl.minecraftchallenges.challenge.ChallengeState;
+import de.carl.minecraftchallenges.custom.CustomChallengeMenu;
+import de.carl.minecraftchallenges.npc.QuickJoin;
 import de.carl.minecraftchallenges.jumpnrun.JumpAndRunService;
 import de.carl.minecraftchallenges.lobby.GameInstance;
 import de.carl.minecraftchallenges.lobby.GameLobbyRegistry;
 import de.carl.minecraftchallenges.lobby.GameType;
 import de.carl.minecraftchallenges.rank.RankService;
 import de.carl.minecraftchallenges.smp.SmpService;
+import de.carl.minecraftchallenges.speedrun.SpeedrunContest;
 import de.carl.minecraftchallenges.util.Messages;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -19,6 +22,8 @@ import org.bukkit.inventory.ItemStack;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 public final class ChallengeMenu {
     public static final int JUMP_AND_RUN_SLOT = 13;
@@ -28,15 +33,19 @@ public final class ChallengeMenu {
             21, GameType.CRAFTING,
             23, GameType.BLOCK_DROP,
             31, GameType.SPONGE,
-            30, GameType.CUSTOM);
+            30, GameType.CUSTOM,
+            32, GameType.SPEEDRUN);
     private final GameLobbyRegistry registry;
     private final JumpAndRunService jumpAndRun;
     private final SmpService smp;
+    private final SpeedrunContest speedruns;
 
-    public ChallengeMenu(GameLobbyRegistry registry, JumpAndRunService jumpAndRun, SmpService smp) {
+    public ChallengeMenu(GameLobbyRegistry registry, JumpAndRunService jumpAndRun, SmpService smp,
+                         SpeedrunContest speedruns) {
         this.registry = registry;
         this.jumpAndRun = jumpAndRun;
         this.smp = smp;
+        this.speedruns = speedruns;
     }
 
     public static GameType gameAt(int rawSlot) {
@@ -63,7 +72,7 @@ public final class ChallengeMenu {
 
         if (smp != null) inventory.setItem(SMP_SLOT, smpItem(player));
 
-        int[] disabledSlots = smp != null ? new int[] {20, 32} : new int[] {20, 24, 32};
+        int[] disabledSlots = smp != null ? new int[] {20} : new int[] {20, 24};
         for (int slot : disabledSlots) {
             inventory.setItem(slot, MenuItems.item(Material.GRAY_DYE,
                     Component.text("Bald verfügbar", NamedTextColor.DARK_GRAY),
@@ -71,6 +80,26 @@ public final class ChallengeMenu {
         }
         player.openInventory(inventory);
     }
+
+    /** Shared by navigator entries and NPCs, including countdown and custom-slot rules. */
+    public void selectGame(Player player, GameType type, boolean quick,
+                           LobbyMenu lobbyMenu, CustomChallengeMenu customMenu) {
+        if (type == GameType.SPEEDRUN) {
+            speedruns.select(player, quick, this::open);
+            return;
+        }
+        GameInstance target = quick ? QuickJoin.select(registry.lobbies(type), player) : null;
+        if (target != null) {
+            player.closeInventory();
+            registry.quickJoin(player, target);
+        } else if (type == GameType.CUSTOM) {
+            customMenu.openList(player);
+        } else {
+            lobbyMenu.open(player, type);
+        }
+    }
+
+    public Map<UUID, Component> speedrunHighscoreLabels(Set<UUID> viewers) { return speedruns.highscoreLabels(viewers); }
 
     public boolean isSmpAvailable() {
         return smp != null;
@@ -119,6 +148,11 @@ public final class ChallengeMenu {
     }
 
     private List<Component> gameLore(Player player, GameType type) {
+        if (type == GameType.SPEEDRUN) return List.of(
+                Component.text(type.description(), NamedTextColor.GRAY),
+                Component.text(speedruns.occupancy() + " Läufe belegt", NamedTextColor.GRAY),
+                Component.text("Linksklick: Starten oder fortsetzen", NamedTextColor.GREEN),
+                Component.text("Rechtsklick: Läufe und Bestenliste", NamedTextColor.YELLOW));
         List<GameInstance> lobbies = registry.lobbies(type);
         int players = lobbies.stream().mapToInt(instance -> instance.presentPlayers().size()).sum();
         long activeLobbies = type == GameType.CUSTOM
@@ -135,9 +169,12 @@ public final class ChallengeMenu {
         if (ownRun != null) {
             lore.add(Component.text("Deine Runde läuft in Lobby " + ownRun.lobbyId(), NamedTextColor.GREEN));
         }
+        if (QuickJoin.select(lobbies, player) != null) {
+            lore.add(Component.text("Linksklick: Quick Join", NamedTextColor.GREEN));
+        }
         lore.add(Component.text(type == GameType.CUSTOM
-                ? "Klicken, um Challenges anzusehen oder zu erstellen"
-                : "Klicken, um eine Lobby zu wählen", NamedTextColor.YELLOW));
+                ? "Rechtsklick: Challenges ansehen oder erstellen"
+                : "Rechtsklick: Lobby wählen", NamedTextColor.YELLOW));
         return lore;
     }
 }

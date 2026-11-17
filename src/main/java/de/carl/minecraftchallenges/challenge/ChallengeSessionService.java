@@ -12,6 +12,10 @@ import java.util.UUID;
 public final class ChallengeSessionService {
     private final Map<UUID, Session> activeSessions = new HashMap<>();
 
+    public boolean hasActiveSession(Player player) {
+        return activeSessions.containsKey(player.getUniqueId());
+    }
+
     public boolean mayEnter(Player player, String challengeKey, String challengeName) {
         Session active = activeSessions.get(player.getUniqueId());
         if (active == null || active.key().equals(challengeKey)) return true;

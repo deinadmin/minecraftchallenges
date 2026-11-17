@@ -74,7 +74,8 @@ final class SmpScoreboard {
                         ? Component.text("Bearbeitungsmodus", NamedTextColor.LIGHT_PURPLE, TextDecoration.BOLD)
                         : smp.isInSpawn(player.getLocation())
                         ? Component.text("Geschützter Spawn", NamedTextColor.AQUA)
-                        : Component.text("Wildnis", NamedTextColor.DARK_GREEN),
+                        : Objects.requireNonNullElse(smp.areaLabel(player),
+                                Component.text("Wildnis", NamedTextColor.DARK_GREEN)),
                 Component.text("/help", NamedTextColor.YELLOW)
                         .append(Component.text(" für Befehle", NamedTextColor.DARK_GRAY)));
         board.render(lines);

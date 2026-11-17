@@ -5,3 +5,11 @@ build/
 run/
 .DS_Store
 server/
+
+deploy/live.json
+
+deploy/known_hosts
+
+.deploy-venv/
+
+__pycache__/

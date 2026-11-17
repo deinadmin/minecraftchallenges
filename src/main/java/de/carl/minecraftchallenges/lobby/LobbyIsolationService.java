@@ -20,6 +20,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,6 +32,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class LobbyIsolationService implements Listener {
     private static final String HUB = "hub";
     private static final String SMP = "smp";
+    private final Map<UUID, TabState> tabHeaders = new HashMap<>();
+    private record TabState(String label, int count) { }
 
     private final MinecraftChallengesPlugin plugin;
     private final LobbyService lobby;
@@ -50,6 +53,7 @@ public final class LobbyIsolationService implements Listener {
 
     public void refreshAll() {
         contexts.clear();
+        tabHeaders.clear();
         plugin.getServer().getOnlinePlayers().forEach(this::refresh);
     }
 
@@ -98,6 +102,8 @@ public final class LobbyIsolationService implements Listener {
         String label = instance != null ? instance.displayName()
                 : smp != null && smp.isSmpWorld(player.getWorld()) ? "SMP" : "Lobby";
         int count = sameContext(player).size();
+        TabState next = new TabState(label, count);
+        if (next.equals(tabHeaders.put(player.getUniqueId(), next))) return;
         player.sendPlayerListHeaderAndFooter(
                 Component.text("MinecraftChallenges", NamedTextColor.GOLD, TextDecoration.BOLD),
                 Component.text(label, NamedTextColor.YELLOW)
@@ -136,6 +142,7 @@ public final class LobbyIsolationService implements Listener {
             plugin.getServer().getConsoleSender().sendMessage(message);
         }
         contexts.remove(event.getPlayer().getUniqueId());
+        tabHeaders.remove(event.getPlayer().getUniqueId());
         plugin.getServer().getScheduler().runTask(plugin,
                 () -> plugin.getServer().getOnlinePlayers().forEach(this::updateTabHeader));
     }

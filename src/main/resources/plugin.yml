@@ -11,7 +11,14 @@ commands:
     permission: minecraftchallenges.rank.admin
   challenge:
     description: Verwaltung der Challenges
-    usage: /challenge <menu|stop|setlobby|reload>
+    usage: /challenge <menu|rejoin|stop|setlobby|reload>
+  invite:
+    description: Lädt Spieler in deine Challenge-Wartelobby ein
+    usage: /invite <Spieler|all>
+  keepalive:
+    description: Hält die laufende Challenge offen, auch wenn alle Spieler gehen (nur Admins)
+    usage: /keepalive
+    permission: minecraftchallenges.command.keepalive
   togglechallengehud:
     description: Blendet das Challenge-HUD für dich ein oder aus
     usage: /togglechallengehud
@@ -35,6 +42,15 @@ commands:
   home:
     description: Teleportiert dich zu deinem SMP-Zuhause
     usage: /home
+  tpa:
+    description: Fragt einen Spieler, ob du dich zu ihm teleportieren darfst
+    usage: /tpa <Spieler>
+  tpaccept:
+    description: Nimmt eine Teleportanfrage an
+    usage: /tpaccept
+  tpdeny:
+    description: Lehnt eine Teleportanfrage ab
+    usage: /tpdeny
   pay:
     description: Überweist einem Spieler Geld
     usage: /pay <Spieler> <Betrag>
@@ -47,8 +63,26 @@ commands:
     usage: /eco <give|take|set> <Spieler> <Betrag>
     permission: minecraftchallenges.command.eco
   shop:
-    description: Öffnet den SMP-Shop
-    usage: /shop [edit]
+    description: Öffnet den SMP-Shop mit den Tagesangeboten
+    usage: /shop [shuffle]
+  sell:
+    description: Verkauft Items zum aktuellen Marktpreis
+    usage: /sell
+    aliases: [sale]
+  prices:
+    description: Zeigt die Marktpreise und heute gesuchte Items
+    usage: /prices
+    aliases: [price]
+  claim:
+    description: Kauft und verwaltet Grundstücke im SMP
+    usage: /claim <buy|upgrade|info|list|trust|untrust|transfer|sell|accept|deny|abandon|border>
+  quest:
+    description: Zeigt deine laufende SMP-Quest oder bricht sie ab
+    usage: /quest [cancel]
+  smpnpc:
+    description: Verwaltet Wanderhändler und Quest-NPCs im SMP
+    usage: /smpnpc <trader|quest <Typ>|reroll|remove|list>
+    permission: minecraftchallenges.command.smpnpc
   setspawn:
     description: Setzt den SMP-Spawn samt Spawnschutz
     usage: /setspawn
@@ -74,9 +108,12 @@ permissions:
       minecraftchallenges.command.jumpnrun: true
       minecraftchallenges.command.setlobby: true
       minecraftchallenges.command.reload: true
+      minecraftchallenges.command.keepalive: true
       minecraftchallenges.command.backup: true
       minecraftchallenges.command.eco: true
       minecraftchallenges.command.shop: true
+      minecraftchallenges.command.claim-admin: true
+      minecraftchallenges.command.smpnpc: true
       minecraftchallenges.command.smp-setspawn: true
       minecraftchallenges.command.ec-others: true
       minecraftchallenges.command.challenge-menu: true
@@ -104,6 +141,9 @@ permissions:
   minecraftchallenges.command.reload:
     description: Darf die Plugin-Konfiguration neu laden
     default: false
+  minecraftchallenges.command.keepalive:
+    description: Darf /keepalive in laufenden Challenges umschalten
+    default: false
   minecraftchallenges.command.backup:
     description: Darf SMP-Backups erstellen, wiederherstellen und löschen
     default: false
@@ -111,7 +151,13 @@ permissions:
     description: Darf SMP-Kontostände verändern
     default: false
   minecraftchallenges.command.shop:
-    description: Darf den SMP-Shop bearbeiten
+    description: Darf die Tagesangebote des SMP-Shops neu mischen
+    default: false
+  minecraftchallenges.command.smpnpc:
+    description: Darf SMP-NPCs setzen, neu auswürfeln und entfernen
+    default: false
+  minecraftchallenges.command.claim-admin:
+    description: Darf fremde Grundstücke mit /claim delete entfernen
     default: false
   minecraftchallenges.command.smp-setspawn:
     description: Darf den SMP-Spawn setzen

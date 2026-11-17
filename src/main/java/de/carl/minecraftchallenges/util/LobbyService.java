@@ -29,6 +29,7 @@ public final class LobbyService {
     private final NamespacedKey regenerationKey;
     private final NamespacedKey jumpAndRunAbortKey;
     private final NamespacedKey queueKey;
+    private java.util.function.Consumer<Player> onHubArrival = player -> { };
     private final Set<UUID> editors = new HashSet<>();
     private final Set<UUID> activeJumpAndRuns = new HashSet<>();
 
@@ -101,13 +102,13 @@ public final class LobbyService {
 
     public void sendToLobby(Player player) {
         editors.remove(player.getUniqueId());
-        player.teleport(getLobby());
+        if (!player.teleport(getLobby())) return;
         prepareLobbyPlayer(player);
     }
 
     public void sendToRegenerationLobby(Player player) {
         editors.remove(player.getUniqueId());
-        player.teleport(getLobby());
+        if (!player.teleport(getLobby())) return;
         player.setGameMode(GameMode.ADVENTURE);
         resetVitals(player);
         player.setFoodLevel(20);
@@ -119,6 +120,10 @@ public final class LobbyService {
         player.getInventory().setItem(COMPASS_SLOT, createRegenerationItem());
         player.getInventory().setHeldItemSlot(COMPASS_SLOT);
         updateFlightPermission(player);
+    }
+
+    public void onHubArrival(java.util.function.Consumer<Player> listener) {
+        onHubArrival = listener;
     }
 
     public void prepareLobbyPlayer(Player player) {
@@ -135,6 +140,7 @@ public final class LobbyService {
         player.getInventory().setItem(COMPASS_SLOT, createCompass());
         player.getInventory().setHeldItemSlot(COMPASS_SLOT);
         updateFlightPermission(player);
+        onHubArrival.accept(player);
     }
 
     private void resetVitals(Player player) {
@@ -142,6 +148,10 @@ public final class LobbyService {
         if (maxHealth != null) maxHealth.setBaseValue(maxHealth.getDefaultValue());
         player.getActivePotionEffects().forEach(effect -> player.removePotionEffect(effect.getType()));
         if (!player.isDead()) player.setHealth(maxHealth == null ? 20.0 : maxHealth.getValue());
+        player.setAbsorptionAmount(0.0);
+        player.setExhaustion(0.0f);
+        player.setRemainingAir(player.getMaximumAir());
+        player.setFallDistance(0.0f);
     }
 
     public void updateFlightPermission(Player player) {

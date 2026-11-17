@@ -1,0 +1,5 @@
+name: SmpServerSmoke
+version: '1.0'
+main: de.carl.minecraftchallenges.smoke.SmpServerSmoke
+api-version: '26.3'
+depend: [MinecraftChallenges]

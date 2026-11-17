@@ -2,12 +2,14 @@ package de.carl.minecraftchallenges.challenge;
 
 import de.carl.minecraftchallenges.MinecraftChallengesPlugin;
 import de.carl.minecraftchallenges.lobby.GameInstance;
+import de.carl.minecraftchallenges.lobby.KeepAliveChallenge;
 import de.carl.minecraftchallenges.lobby.GameType;
 import de.carl.minecraftchallenges.util.LobbyService;
 import de.carl.minecraftchallenges.util.Messages;
 import de.carl.minecraftchallenges.util.TimeFormatter;
 import de.carl.minecraftchallenges.util.WorldFiles;
 import de.carl.minecraftchallenges.util.WorldLoader;
+import de.carl.minecraftchallenges.util.ScoreboardUpdates;
 import de.carl.minecraftchallenges.rank.RankService;
 import de.carl.minecraftchallenges.menu.SpectatorMenuHolder;
 import net.kyori.adventure.bossbar.BossBar;
@@ -31,7 +33,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.Criteria;
 import org.bukkit.scoreboard.DisplaySlot;
@@ -50,11 +51,10 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
-public final class ChallengeManager implements GameInstance {
-    private static final int EMPTY_ROUND_RESET_SECONDS = 10 * 60;
+public final class ChallengeManager implements KeepAliveChallenge {
     public static final int SKIP_SLOT = 9;
     public static final int WAITING_LOBBY_SLOT = 4;
-    public static final int ADMIN_LOBBY_SLOT = 3;
+    public static final int PAIRED_LOBBY_SLOT = 3;
     public static final int ADMIN_START_SLOT = 5;
     public static final int SPECTATOR_COMPASS_SLOT = 4;
     public static final int READY_SLOT = 5;
@@ -90,10 +90,11 @@ public final class ChallengeManager implements GameInstance {
     private final Map<UUID, Integer> points = new HashMap<>();
     private final Map<UUID, Integer> skips = new HashMap<>();
     private final Map<UUID, BossBar> bossBars = new HashMap<>();
-    private final Map<UUID, PlayerRunSnapshot> savedPlayerStates = new HashMap<>();
+    private final Map<UUID, PlayerSnapshot> savedPlayerStates = new HashMap<>();
     private final Map<UUID, Location> lastChallengeLocations = new HashMap<>();
     private final Set<UUID> regeneratingPlayers = new HashSet<>();
     private final Set<UUID> readyPlayers = new HashSet<>();
+    private final ChallengeKeepAlive keepAlive = new ChallengeKeepAlive();
 
     private ChallengeState state = ChallengeState.IDLE;
     private World challengeWorld;
@@ -104,7 +105,6 @@ public final class ChallengeManager implements GameInstance {
     private BukkitTask roundTask;
     private BukkitTask borderDisableTask;
     private int secondsRemaining;
-    private int emptyRoundSeconds;
     private int activeRoundDurationSeconds;
     private boolean readyCountdown;
     private int idleSeconds;
@@ -140,9 +140,12 @@ public final class ChallengeManager implements GameInstance {
 
     @Override
     public CompletableFuture<Boolean> prepare() {
-        if (preparation != null && isWorldLoaded() && !preparation.isCompletedExceptionally()) return preparation;
-        if (!ensureWorld()) return CompletableFuture.completedFuture(false);
-        preparation = WorldLoader.preloadSpawn(plugin, challengeWorld).thenApply(ignored -> true);
+        if (preparation != null && !preparation.isCompletedExceptionally()
+                && (!preparation.isDone() || isWorldLoaded())) return preparation;
+        preparation = plugin.worldPreparation().submit(() -> {
+            if (!ensureWorld()) return CompletableFuture.completedFuture(false);
+            return WorldLoader.preloadSpawn(plugin, challengeWorld).thenApply(ignored -> true);
+        });
         return preparation;
     }
 
@@ -158,7 +161,6 @@ public final class ChallengeManager implements GameInstance {
                     + " wird geladen; falls sie fehlt, wird sie erstellt.");
         }
         challengeWorld = WorldLoader.create(creator);
-        preparation = null;
         if (challengeWorld == null) return false;
 
         challengeWorld.setDifficulty(Difficulty.NORMAL);
@@ -240,10 +242,6 @@ public final class ChallengeManager implements GameInstance {
             if (error != null) {
                 plugin.getLogger().severe("Challenge-Welt konnte nicht gelöscht werden: " + error.getMessage());
                 abortRegeneration(adminId, "Die alte Challenge-Welt konnte nicht gelöscht werden.");
-                return;
-            }
-            if (!createChallengeWorld(worldName, true)) {
-                abortRegeneration(adminId, "Die neue Challenge-Welt konnte nicht erstellt werden.");
                 return;
             }
             prepare().whenComplete((ready, preloadError) -> {
@@ -375,7 +373,8 @@ public final class ChallengeManager implements GameInstance {
 
     @Override
     public void tickIdle(int idleUnloadSeconds) {
-        boolean idle = challengeWorld != null && challengeWorld.getPlayers().isEmpty()
+        boolean idle = (preparation == null || preparation.isDone())
+                && challengeWorld != null && challengeWorld.getPlayers().isEmpty()
                 && (state == ChallengeState.IDLE || state == ChallengeState.WAITING
                 || state == ChallengeState.FINISHED);
         if (!idle) {
@@ -463,7 +462,7 @@ public final class ChallengeManager implements GameInstance {
                     "Die Challenge-Welt wird gerade neu generiert.");
             return;
         }
-        if (!ensureWorld()) {
+        if (!isWorldLoaded()) {
             Messages.send(player, Messages.Type.ERROR,
                     "Die Challenge-Welt von Lobby " + lobbyId + " ist nicht verfügbar.");
             return;
@@ -474,7 +473,7 @@ public final class ChallengeManager implements GameInstance {
                 setupScoreboard();
                 joinWaiting(player);
             }
-            case WAITING, FINISHED -> {
+            case WAITING, FINISHED, COUNTDOWN -> {
                 if (getOnlineChallengePlayerCount() >= MAX_CONCURRENT_PLAYERS) {
                     joinSpectator(player);
                     Messages.send(player, Messages.Type.INFO,
@@ -483,7 +482,7 @@ public final class ChallengeManager implements GameInstance {
                     joinWaiting(player);
                 }
             }
-            case COUNTDOWN, RUNNING -> {
+            case RUNNING -> {
                 if (participants.contains(player.getUniqueId())) rejoinParticipant(player);
                 else joinSpectator(player);
             }
@@ -533,21 +532,20 @@ public final class ChallengeManager implements GameInstance {
     }
 
     private void rejoinParticipant(Player player) {
-        spectators.remove(player.getUniqueId());
+        UUID uuid = player.getUniqueId();
+        Location savedLocation = lastChallengeLocations.get(uuid);
+        if (!player.teleport(savedLocation != null && isChallengeWorld(savedLocation.getWorld())
+                ? savedLocation : safeSpawn())) return;
+        spectators.remove(uuid);
         player.closeInventory();
         player.getInventory().clear();
-        player.teleport(safeSpawn());
         assignScoreboard(player);
         if (state == ChallengeState.RUNNING) {
             player.setGameMode(GameMode.SURVIVAL);
             disableFlight(player);
-            Location savedLocation = lastChallengeLocations.get(player.getUniqueId());
-            if (savedLocation != null && isChallengeWorld(savedLocation.getWorld())) {
-                player.teleport(savedLocation);
-            }
-            PlayerRunSnapshot snapshot = savedPlayerStates.get(player.getUniqueId());
+            PlayerSnapshot snapshot = savedPlayerStates.remove(player.getUniqueId());
             if (snapshot != null) {
-                restoreRunSnapshot(player, snapshot);
+                snapshot.restore(player);
             } else {
                 giveSkipItem(player);
             }
@@ -670,10 +668,11 @@ public final class ChallengeManager implements GameInstance {
     private void beginRound() {
         state = ChallengeState.RUNNING;
         sessions.claim(participants, sessionKey(), displayName());
-        emptyRoundSeconds = 0;
+        keepAlive.roundStarted();
         readyCountdown = false;
         readyPlayers.clear();
         animateBorderOpening();
+        WorldLoader.releaseSpawn(plugin, challengeWorld);
         activeRoundDurationSeconds = getRoundDurationSeconds();
         secondsRemaining = activeRoundDurationSeconds;
         for (Player player : onlineParticipants()) {
@@ -692,7 +691,7 @@ public final class ChallengeManager implements GameInstance {
         updateScoreboard();
 
         roundTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            if (checkEmptyRoundTimeout()) return;
+            if (checkInactivityTimeout()) return;
             secondsRemaining--;
             updateBossBars();
             updateScoreboard();
@@ -700,15 +699,30 @@ public final class ChallengeManager implements GameInstance {
         }, 20L, 20L);
     }
 
-    private boolean checkEmptyRoundTimeout() {
-        if (!onlineParticipants().isEmpty()) {
-            emptyRoundSeconds = 0;
-            return false;
+    private boolean checkInactivityTimeout() {
+        List<Player> present = onlineParticipants();
+        switch (keepAlive.tick(!present.isEmpty(), plugin.playerActivity().latest(present))) {
+            case SAVE -> saveForKeepAlive();
+            case EXPIRED -> {
+                plugin.getLogger().info(displayName() + " wurde nach " + ChallengeKeepAlive.INACTIVITY_TIMEOUT_MINUTES
+                        + " Minuten ohne aktive Teilnehmer beendet.");
+                finishRound();
+                return true;
+            }
+            case CONTINUE -> { }
         }
-        if (++emptyRoundSeconds < EMPTY_ROUND_RESET_SECONDS) return false;
-        plugin.getLogger().info(displayName() + " wurde nach 10 Minuten ohne Teilnehmer zurückgesetzt.");
-        finishRound();
-        return true;
+        return false;
+    }
+
+    @Override
+    public ChallengeKeepAlive keepAlive() {
+        return keepAlive;
+    }
+
+    @Override
+    public void saveForKeepAlive() {
+        if (isWorldLoaded()) challengeWorld.save();
+        onlineParticipants().forEach(Player::saveData);
     }
 
     public void handleMobKill(Player killer, EntityType killedType) {
@@ -750,7 +764,7 @@ public final class ChallengeManager implements GameInstance {
         if (!isRunning()) return;
         state = ChallengeState.FINISHED;
         sessions.release(participants, sessionKey());
-        emptyRoundSeconds = 0;
+        keepAlive.roundEnded();
         if (roundTask != null) roundTask.cancel();
         roundTask = null;
         secondsRemaining = 0;
@@ -810,6 +824,7 @@ public final class ChallengeManager implements GameInstance {
     public void handleRespawn(Player player) {
         if (!isChallengeWorld(player.getWorld())) return;
         Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!player.isOnline() || !isChallengeWorld(player.getWorld())) return;
             assignScoreboard(player);
             if (isRunning() && isParticipant(player)) {
                 player.setGameMode(GameMode.SURVIVAL);
@@ -844,7 +859,7 @@ public final class ChallengeManager implements GameInstance {
     }
 
     public void playerQuit(Player player) {
-        saveRunSnapshot(player);
+        if (isChallengeWorld(player.getWorld())) saveRunSnapshot(player);
         BossBar bar = bossBars.remove(player.getUniqueId());
         if (bar != null) plugin.challengeHud().hideBossBar(player, bar);
         plugin.challengeHud().sendActionBar(player, Component.empty());
@@ -919,83 +934,19 @@ public final class ChallengeManager implements GameInstance {
     }
 
     private void saveRunSnapshot(Player player) {
-        if (!isRunning() || !isParticipant(player)) return;
+        if (!isRunning() || !isParticipant(player) || player.isDead()) return;
         UUID uuid = player.getUniqueId();
-        if (!isChallengeWorld(player.getWorld()) && savedPlayerStates.containsKey(uuid)) return;
-        savedPlayerStates.put(uuid, new PlayerRunSnapshot(
-                cloneContents(player.getInventory().getContents()),
-                cloneContents(player.getInventory().getArmorContents()),
-                cloneContents(player.getInventory().getExtraContents()),
-                player.getInventory().getHeldItemSlot(),
-                player.getHealth(),
-                player.getAbsorptionAmount(),
-                player.getFoodLevel(),
-                player.getSaturation(),
-                player.getExhaustion(),
-                player.getLevel(),
-                player.getExp(),
-                player.getTotalExperience(),
-                player.getRemainingAir(),
-                player.getFireTicks(),
-                player.getFallDistance(),
-                List.copyOf(player.getActivePotionEffects())));
-        if (isChallengeWorld(player.getWorld())) {
-            lastChallengeLocations.put(uuid, player.getLocation().clone());
-        }
-    }
-
-    private static ItemStack[] cloneContents(ItemStack[] contents) {
-        ItemStack[] copy = new ItemStack[contents.length];
-        for (int index = 0; index < contents.length; index++) {
-            copy[index] = contents[index] == null ? null : contents[index].clone();
-        }
-        return copy;
-    }
-
-    private void restoreRunSnapshot(Player player, PlayerRunSnapshot snapshot) {
-        player.getInventory().setContents(cloneContents(snapshot.contents()));
-        player.getInventory().setArmorContents(cloneContents(snapshot.armorContents()));
-        player.getInventory().setExtraContents(cloneContents(snapshot.extraContents()));
-        player.getInventory().setHeldItemSlot(Math.max(0, Math.min(8, snapshot.heldSlot())));
-
-        player.setHealth(Math.max(0.1, Math.min(player.getMaxHealth(), snapshot.health())));
-        player.setAbsorptionAmount(Math.max(0.0, snapshot.absorption()));
-        player.setFoodLevel(Math.max(0, Math.min(20, snapshot.foodLevel())));
-        player.setSaturation(Math.max(0.0f, Math.min(snapshot.saturation(), player.getFoodLevel())));
-        player.setExhaustion(Math.max(0.0f, snapshot.exhaustion()));
-        player.setLevel(Math.max(0, snapshot.level()));
-        player.setExp(Math.max(0.0f, Math.min(1.0f, snapshot.experienceProgress())));
-        player.setTotalExperience(Math.max(0, snapshot.totalExperience()));
-        player.setRemainingAir(Math.max(0, Math.min(player.getMaximumAir(), snapshot.remainingAir())));
-        player.setFireTicks(snapshot.fireTicks());
-        player.setFallDistance(Math.max(0.0f, snapshot.fallDistance()));
-        player.getActivePotionEffects().forEach(effect -> player.removePotionEffect(effect.getType()));
-        player.addPotionEffects(snapshot.potionEffects());
+        // Login can trigger a second departure from the old world. Keep the original run state.
+        savedPlayerStates.computeIfAbsent(uuid, ignored -> {
+            if (isChallengeWorld(player.getWorld())) lastChallengeLocations.put(uuid, player.getLocation().clone());
+            return PlayerSnapshot.capture(player);
+        });
     }
 
     private void clearRunSnapshots() {
         savedPlayerStates.clear();
         lastChallengeLocations.clear();
     }
-
-    private record PlayerRunSnapshot(
-            ItemStack[] contents,
-            ItemStack[] armorContents,
-            ItemStack[] extraContents,
-            int heldSlot,
-            double health,
-            double absorption,
-            int foodLevel,
-            float saturation,
-            float exhaustion,
-            int level,
-            float experienceProgress,
-            int totalExperience,
-            int remainingAir,
-            int fireTicks,
-            float fallDistance,
-            List<PotionEffect> potionEffects
-    ) { }
 
     private void giveSpectatorCompass(Player player) {
         ItemStack item = new ItemStack(Material.COMPASS);
@@ -1065,12 +1016,14 @@ public final class ChallengeManager implements GameInstance {
 
     private void giveWaitingItems(Player player) {
         boolean manager = ranks.canManageChallenge(player);
-        player.getInventory().setItem(manager ? ADMIN_LOBBY_SLOT : WAITING_LOBBY_SLOT, createBackToLobbyItem());
+        boolean canReady = !manager && player.hasPermission("minecraftchallenges.challenge.ready");
+        boolean hasSecondItem = manager || canReady;
+        ItemStack backItem = createBackToLobbyItem();
+        player.getInventory().setItem(PAIRED_LOBBY_SLOT, hasSecondItem ? backItem : null);
+        player.getInventory().setItem(WAITING_LOBBY_SLOT, hasSecondItem ? null : backItem);
         if (!manager) {
-            if (player.hasPermission("minecraftchallenges.challenge.ready")) {
-                player.getInventory().setItem(READY_SLOT, createReadyItem(
-                        readyPlayers.contains(player.getUniqueId())));
-            }
+            player.getInventory().setItem(READY_SLOT,
+                    canReady ? createReadyItem(readyPlayers.contains(player.getUniqueId())) : null);
             return;
         }
 
@@ -1165,10 +1118,10 @@ public final class ChallengeManager implements GameInstance {
             case IDLE -> "Lobby";
             case REGENERATING -> "Generiert...";
         };
-        scoreObjective.displayName(Component.text("Mob-Jagd #" + lobbyId + " • " + phase, NamedTextColor.GOLD));
+        ScoreboardUpdates.title(scoreObjective, Component.text("Mob-Jagd #" + lobbyId + " • " + phase, NamedTextColor.GOLD));
         for (UUID uuid : allChallengePlayerIds()) {
             String name = Objects.requireNonNullElse(Bukkit.getOfflinePlayer(uuid).getName(), uuid.toString().substring(0, 8));
-            scoreObjective.getScore(name).setScore(points.getOrDefault(uuid, 0));
+            ScoreboardUpdates.score(scoreObjective, name, points.getOrDefault(uuid, 0));
         }
     }
 
@@ -1200,6 +1153,7 @@ public final class ChallengeManager implements GameInstance {
     }
 
     private void activateWaitingBorder() {
+        WorldLoader.retainSpawn(plugin, challengeWorld);
         if (challengeWorld == null) return;
         cancelBorderDisableTask();
         double radius = Math.max(5.0,
@@ -1271,6 +1225,7 @@ public final class ChallengeManager implements GameInstance {
     @Override
     public void shutdown() {
         state = ChallengeState.IDLE;
+        keepAlive.roundEnded();
         sessions.release(participants, sessionKey());
         if (countdownTask != null) countdownTask.cancel();
         if (roundTask != null) roundTask.cancel();

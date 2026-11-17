@@ -2,6 +2,7 @@ package de.carl.minecraftchallenges.smp;
 
 import de.carl.minecraftchallenges.MinecraftChallengesPlugin;
 import de.carl.minecraftchallenges.lobby.GameLobbyRegistry;
+import de.carl.minecraftchallenges.rank.RankService;
 import de.carl.minecraftchallenges.util.LobbyService;
 import de.carl.minecraftchallenges.util.Messages;
 import com.destroystokyo.paper.event.player.PlayerAdvancementCriterionGrantEvent;
@@ -205,6 +206,8 @@ public final class SmpListener implements Listener {
     public void onGameModeChange(PlayerGameModeChangeEvent event) {
         Player player = event.getPlayer();
         if (!smp.isActive(player)) return;
+        // Admins may use /gamemode freely, also in the SMP.
+        if (player.hasPermission(RankService.ADMIN)) return;
         GameMode mode = event.getNewGameMode();
         if (smp.isEditing(player)) {
             if (mode == GameMode.SURVIVAL || mode == GameMode.ADVENTURE) {

@@ -90,11 +90,12 @@ public final class LobbyListener implements Listener {
         if (event.getView().getTopInventory().getHolder() instanceof ChallengeMenuHolder) {
             event.setCancelled(true);
             if (!(event.getWhoClicked() instanceof Player player)) return;
+            boolean leftClick = event.getClick().isLeftClick();
+            boolean rightClick = event.getClick().isRightClick();
+            if (!leftClick && !rightClick) return;
             GameType game = ChallengeMenu.gameAt(event.getRawSlot());
-            if (game == GameType.CUSTOM) {
-                customMenu.openList(player);
-            } else if (game != null) {
-                lobbyMenu.open(player, game);
+            if (game != null) {
+                menu.selectGame(player, game, leftClick, lobbyMenu, customMenu);
             } else if (event.getRawSlot() == ChallengeMenu.JUMP_AND_RUN_SLOT
                     && menu.isJumpAndRunAvailable()) {
                 menu.selectJumpAndRun(player);

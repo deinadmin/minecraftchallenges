@@ -3,6 +3,7 @@ package de.carl.minecraftchallenges;
 import de.carl.minecraftchallenges.challenge.ChallengeManager;
 import de.carl.minecraftchallenges.challenge.ChallengeHudService;
 import de.carl.minecraftchallenges.challenge.ChallengeSessionService;
+import de.carl.minecraftchallenges.challenge.PlayerActivityTracker;
 import de.carl.minecraftchallenges.custom.CustomChallenge;
 import de.carl.minecraftchallenges.custom.CustomChallengeListener;
 import de.carl.minecraftchallenges.custom.CustomChallengeMenu;
@@ -30,10 +31,11 @@ import de.carl.minecraftchallenges.smp.SmpCommands;
 import de.carl.minecraftchallenges.smp.SmpListener;
 import de.carl.minecraftchallenges.smp.SmpService;
 import de.carl.minecraftchallenges.smp.SpawnProtectionListener;
-import de.carl.minecraftchallenges.smp.shop.ShopCommand;
-import de.carl.minecraftchallenges.smp.shop.ShopMenu;
-import de.carl.minecraftchallenges.smp.shop.ShopService;
+import de.carl.minecraftchallenges.smp.SmpFeatures;
 import de.carl.minecraftchallenges.util.LobbyService;
+import de.carl.minecraftchallenges.speedrun.SpeedrunContest;
+import de.carl.minecraftchallenges.util.SerialWorkQueue;
+import de.carl.minecraftchallenges.randomizer.SpongeTerrainService;
 import de.carl.minecraftchallenges.util.Messages;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -43,22 +45,31 @@ import java.util.List;
 import java.util.logging.Level;
 
 public final class MinecraftChallengesPlugin extends JavaPlugin {
+    private SerialWorkQueue worldPreparation;
+    private SpongeTerrainService spongeTerrain;
     private ChallengeHudService challengeHud;
+    private PlayerActivityTracker playerActivity;
     private LobbyService lobbyService;
     private GameLobbyRegistry lobbies;
     private JumpAndRunService jumpAndRunService;
     private SmpService smp;
     private BackupService backups;
-    private ShopMenu shopMenu;
+    private SmpFeatures smpFeatures;
     private NpcService npcs;
+    private SpeedrunContest speedruns;
     private VanillaChatService vanillaChat;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        worldPreparation = new SerialWorkQueue(task -> getServer().getScheduler().runTask(this, task));
+        spongeTerrain = new SpongeTerrainService(this);
+        getServer().getPluginManager().registerEvents(spongeTerrain, this);
 
         challengeHud = new ChallengeHudService(() -> getServer().getScoreboardManager().getNewScoreboard());
         getServer().getPluginManager().registerEvents(challengeHud, this);
+        playerActivity = new PlayerActivityTracker();
+        getServer().getPluginManager().registerEvents(playerActivity, this);
         lobbyService = new LobbyService(this);
         RankService rankService = new RankService(this, lobbyService);
         ChallengeSessionService sessions = new ChallengeSessionService();
@@ -88,6 +99,9 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
+        speedruns = new SpeedrunContest(this, lobbyService, lobbies, sessions);
+        getServer().getPluginManager().registerEvents(speedruns, this);
+        lobbyService.onHubArrival(lobbies::offerRejoin);
         lobbies.startIdleMonitor();
         GameLobbyRegistry registry = lobbies;
         Messages.setChallengeLocator(player -> registry.instance(player.getWorld()) != null);
@@ -99,20 +113,18 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
             Messages.setSmpLocator(player -> smpService.isSmpWorld(player.getWorld()));
             getServer().getPluginManager().registerEvents(new SmpListener(this, smp, lobbyService, lobbies), this);
             getServer().getPluginManager().registerEvents(new SpawnProtectionListener(this, smp), this);
-            ShopService shop = new ShopService(getDataFolder().toPath().resolve("shop.yml"), smp.writer(), getLogger());
-            shopMenu = new ShopMenu(this, smp, shop);
-            getServer().getPluginManager().registerEvents(shopMenu, this);
+            smpFeatures = new SmpFeatures(this, smp);
         } catch (IOException | IllegalStateException exception) {
             getLogger().log(Level.SEVERE, "Das SMP konnte nicht gestartet werden und bleibt deaktiviert.", exception);
             smp = null;
             backups = null;
-            shopMenu = null;
+            smpFeatures = null;
         }
 
         vanillaChat = new VanillaChatService(this);
 
         jumpAndRunService = new JumpAndRunService(this, lobbyService);
-        ChallengeMenu challengeMenu = new ChallengeMenu(lobbies, jumpAndRunService, smp);
+        ChallengeMenu challengeMenu = new ChallengeMenu(lobbies, jumpAndRunService, smp, speedruns);
         LobbyMenu lobbyMenu = new LobbyMenu(this, lobbies);
         CustomChallengeSlots customSlots = new CustomChallengeSlots(this, lobbyService, rankService, lobbies, slot -> {
             try {
@@ -154,6 +166,12 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
             command.setExecutor(executor);
             command.setTabCompleter(executor);
         }
+        PluginCommand inviteCommand = getCommand("invite");
+        if (inviteCommand != null) {
+            InviteCommand executor = new InviteCommand(this, lobbies, rankService);
+            inviteCommand.setExecutor(executor);
+            inviteCommand.setTabCompleter(executor);
+        }
         PluginCommand lobbyCommand = getCommand("lobby");
         if (lobbyCommand != null) {
             lobbyCommand.setExecutor(new LobbyCommand(lobbyService, lobbies));
@@ -166,6 +184,12 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
         if (hudCommand != null) {
             hudCommand.setExecutor(new ToggleChallengeHudCommand(lobbies, challengeHud));
             hudCommand.setTabCompleter((sender, commandName, alias, args) -> List.of());
+        }
+        PluginCommand keepAliveCommand = getCommand("keepalive");
+        if (keepAliveCommand != null) {
+            KeepAliveCommand executor = new KeepAliveCommand(lobbies);
+            keepAliveCommand.setExecutor(executor);
+            keepAliveCommand.setTabCompleter(executor);
         }
         HelpCommand help = new HelpCommand(lobbyService, lobbies, smp);
         getServer().getPluginManager().registerEvents(help, this);
@@ -185,8 +209,15 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
                 + " Lobbys pro Spiel).");
     }
 
+    public SerialWorkQueue worldPreparation() { return worldPreparation; }
+    public SpongeTerrainService spongeTerrain() { return spongeTerrain; }
+
     public ChallengeHudService challengeHud() {
         return challengeHud;
+    }
+
+    public PlayerActivityTracker playerActivity() {
+        return playerActivity;
     }
 
     private CustomChallenge registerCustomSlot(RankService rankService, ChallengeSessionService sessions, int slot) {
@@ -201,14 +232,15 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
     private void registerSmpCommands() {
         SmpCommands smpCommands = smp == null ? null : new SmpCommands(smp);
         BackupCommand backupCommand = backups == null ? null : new BackupCommand(backups);
-        ShopCommand shopCommand = shopMenu == null ? null : new ShopCommand(shopMenu);
-        for (String name : List.of("sethome", "home", "spawn", "pay", "money", "eco", "setspawn", "ec", "backup", "shop")) {
+        List<String> names = new java.util.ArrayList<>(
+                List.of("sethome", "home", "spawn", "tpa", "tpaccept", "tpdeny", "pay", "money", "eco", "setspawn", "ec", "backup"));
+        names.addAll(SmpFeatures.commandNames());
+        for (String name : names) {
             PluginCommand command = getCommand(name);
             if (command == null) continue;
             boolean missing = switch (name) {
                 case "backup" -> backupCommand == null;
-                case "shop" -> shopCommand == null;
-                default -> smpCommands == null;
+                default -> SmpFeatures.commandNames().contains(name) ? smpFeatures == null : smpCommands == null;
             };
             if (missing) {
                 command.setExecutor((sender, ignored, label, args) -> {
@@ -220,20 +252,21 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
             if (name.equals("backup")) {
                 command.setExecutor(backupCommand);
                 command.setTabCompleter(backupCommand);
-            } else if (name.equals("shop")) {
-                command.setExecutor(shopCommand);
-                command.setTabCompleter(shopCommand);
-            } else {
+            } else if (!SmpFeatures.commandNames().contains(name)) {
                 command.setExecutor(smpCommands);
                 command.setTabCompleter(smpCommands);
             }
         }
+        if (smpFeatures != null) smpFeatures.registerCommands();
     }
 
     @Override
     public void onDisable() {
+        if (worldPreparation != null) worldPreparation.close();
+        if (spongeTerrain != null) spongeTerrain.close();
         if (vanillaChat != null) vanillaChat.shutdown();
         if (npcs != null) npcs.shutdown();
+        if (smpFeatures != null) smpFeatures.shutdown();
         if (backups != null) backups.shutdown();
         if (smp != null) smp.shutdown();
         if (jumpAndRunService != null) {
@@ -243,5 +276,6 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
             lobbyService.shutdownEditing();
         }
         if (lobbies != null) lobbies.shutdown();
+        if (speedruns != null) speedruns.saveRecords();
     }
 }

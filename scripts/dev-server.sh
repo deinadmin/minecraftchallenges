@@ -248,11 +248,14 @@ case "${1:-restart}" in
         build_plugin
         start_server
         ;;
+    console)
+        attach_console
+        ;;
     logs)
         show_logs
         ;;
     *)
-        echo "Verwendung: $0 {build|start|stop|restart|logs}" >&2
+        echo "Verwendung: $0 {build|start|stop|restart|console|logs}" >&2
         exit 2
         ;;
 esac

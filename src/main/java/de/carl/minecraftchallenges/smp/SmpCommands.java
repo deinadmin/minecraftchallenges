@@ -15,7 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-/** /sethome, /home, /spawn, /pay, /money, /ec and the admin commands /eco and /setspawn. */
+/** /sethome, /home, /spawn, /tpa, /tpaccept, /tpdeny, /pay, /money, /ec and the admin commands /eco and /setspawn. */
 public final class SmpCommands implements CommandExecutor, TabCompleter {
     public static final String ECO_PERMISSION = "minecraftchallenges.command.eco";
     public static final String SETSPAWN_PERMISSION = "minecraftchallenges.command.smp-setspawn";
@@ -34,6 +34,12 @@ public final class SmpCommands implements CommandExecutor, TabCompleter {
             case "sethome" -> withPlayer(sender, smp::setHome);
             case "home" -> withPlayer(sender, smp::teleportHome);
             case "spawn" -> withPlayer(sender, smp::teleportSpawn);
+            case "tpa" -> withPlayer(sender, player -> {
+                if (args.length != 1) Messages.send(player, Messages.Type.ERROR, "Verwendung: /tpa <Spieler>");
+                else smp.requestTpa(player, args[0]);
+            });
+            case "tpaccept" -> withPlayer(sender, smp::acceptTpa);
+            case "tpdeny" -> withPlayer(sender, smp::denyTpa);
             case "pay" -> pay(sender, args);
             case "money" -> money(sender, args);
             case "eco" -> eco(sender, args);
@@ -206,6 +212,10 @@ public final class SmpCommands implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
                                       @NotNull String alias, @NotNull String[] args) {
         String name = command.getName().toLowerCase(Locale.ROOT);
+        if (name.equals("tpa") && args.length == 1) {
+            return filter(Bukkit.getOnlinePlayers().stream().filter(player -> !player.equals(sender))
+                    .map(Player::getName), args[0]);
+        }
         if (name.equals("pay") && args.length == 1) return playerNames(sender, args[0]);
         if (name.equals("money") && args.length == 1) return playerNames(sender, args[0]);
         if (name.equals("ec") && args.length == 1 && sender.hasPermission(EC_OTHERS_PERMISSION)) {

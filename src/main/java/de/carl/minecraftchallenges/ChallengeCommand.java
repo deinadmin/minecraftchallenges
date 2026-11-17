@@ -9,6 +9,7 @@ import de.carl.minecraftchallenges.util.LobbyService;
 import de.carl.minecraftchallenges.util.Messages;
 import de.carl.minecraftchallenges.rank.RankService;
 import de.carl.minecraftchallenges.randomizer.RandomizerChallenge;
+import de.carl.minecraftchallenges.speedrun.SpeedrunRun;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -49,6 +50,13 @@ public final class ChallengeCommand implements CommandExecutor, TabCompleter {
         }
 
         switch (sub) {
+            case "rejoin" -> {
+                if (!(sender instanceof Player player)) {
+                    Messages.sendSystem(sender, Messages.Type.ERROR, "Dieser Befehl ist nur für Spieler.");
+                } else {
+                    registry.rejoin(player);
+                }
+            }
             case "stop" -> {
                 if (!require(sender, RankService.MANAGE_CHALLENGE)) return true;
                 if (sender instanceof Player player) {
@@ -56,12 +64,15 @@ public final class ChallengeCommand implements CommandExecutor, TabCompleter {
                     if (instance instanceof RandomizerChallenge randomizer) randomizer.stop();
                     else if (instance instanceof ChallengeManager mobHunt) mobHunt.stopRound();
                     else if (instance instanceof CustomChallenge custom) custom.stop();
+                    else if (instance instanceof SpeedrunRun speedrun) speedrun.stop();
                     else Messages.send(sender, Messages.Type.ERROR,
                                 "Du musst dafür in der Lobby einer Challenge sein.");
                 } else {
                     registry.mobHunts().forEach(ChallengeManager::stopRound);
                     registry.randomizers().forEach(RandomizerChallenge::stop);
                     registry.customs().forEach(CustomChallenge::stop);
+                    registry.all().stream().filter(SpeedrunRun.class::isInstance)
+                            .map(SpeedrunRun.class::cast).forEach(SpeedrunRun::stop);
                 }
             }
             case "setlobby" -> {
@@ -85,7 +96,7 @@ public final class ChallengeCommand implements CommandExecutor, TabCompleter {
                         "Konfiguration neu geladen.");
             }
             default -> Messages.sendSystem(sender, Messages.Type.USUAL,
-                    "/challenge <menu|stop|setlobby|reload>");
+                    "/challenge <menu|rejoin|stop|setlobby|reload>");
         }
         return true;
     }
@@ -102,6 +113,7 @@ public final class ChallengeCommand implements CommandExecutor, TabCompleter {
         if (args.length != 1) return List.of();
         java.util.ArrayList<String> choices = new java.util.ArrayList<>();
         if (sender.hasPermission("minecraftchallenges.command.challenge-menu")) choices.add("menu");
+        if (sender instanceof Player) choices.add("rejoin");
         if (sender.hasPermission(RankService.MANAGE_CHALLENGE)) choices.add("stop");
         if (sender.hasPermission("minecraftchallenges.command.setlobby")) choices.add("setlobby");
         if (sender.hasPermission("minecraftchallenges.command.reload")) choices.add("reload");

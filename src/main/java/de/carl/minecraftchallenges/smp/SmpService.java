@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * One permanent survival world with its own Nether and End. Player state lives in SMP profiles: it is
@@ -47,7 +48,15 @@ public final class SmpService {
     private final Set<UUID> joining = new HashSet<>();
     private final Set<UUID> editors = new HashSet<>();
     private final Map<UUID, BukkitTask> teleportWarmups = new HashMap<>();
+    /** Open /tpa requests by the receiving player; a newer request replaces an older one. */
+    private final Map<UUID, TpaRequest> tpaRequests = new HashMap<>();
+    private static final long TPA_EXPIRY_MILLIS = 60_000L;
+
+    private record TpaRequest(UUID from, long expires) {
+    }
     private final Map<String, Path> worldFolders = new LinkedHashMap<>();
+    private final List<Runnable> reloadListeners = new ArrayList<>();
+    private java.util.function.Function<Player, net.kyori.adventure.text.Component> areaLabel = player -> null;
     private World overworld;
     private World nether;
     private World end;
@@ -268,6 +277,41 @@ public final class SmpService {
         announce(player, player.getName() + " hat das SMP betreten.");
     }
 
+    /** Sends a message to everyone who is currently playing in the SMP. */
+    public void broadcast(net.kyori.adventure.text.Component message) {
+        for (UUID uuid : active) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null) player.sendMessage(message);
+        }
+    }
+
+    public List<Player> activePlayers() {
+        List<Player> players = new ArrayList<>();
+        for (UUID uuid : active) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player != null) players.add(player);
+        }
+        return players;
+    }
+
+    /** Runs after a backup restore replaced the files in the SMP data folder. */
+    public void onReload(Runnable listener) {
+        reloadListeners.add(listener);
+    }
+
+    /** Lets the claim system name the area a player stands in; null means wilderness. */
+    public void areaLabel(java.util.function.Function<Player, net.kyori.adventure.text.Component> label) {
+        this.areaLabel = label;
+    }
+
+    public net.kyori.adventure.text.Component areaLabel(Player player) {
+        return areaLabel.apply(player);
+    }
+
+    public MinecraftChallengesPlugin plugin() {
+        return plugin;
+    }
+
     /** Join/leave notices only reach the SMP, like its chat. */
     private void announce(Player subject, String text) {
         for (UUID uuid : active) {
@@ -314,6 +358,8 @@ public final class SmpService {
         leave(player, false);
         scoreboard.forget(player.getUniqueId());
         joining.remove(player.getUniqueId());
+        tpaRequests.remove(player.getUniqueId());
+        tpaRequests.values().removeIf(request -> request.from().equals(player.getUniqueId()));
     }
 
     public void saveAll() {
@@ -449,12 +495,94 @@ public final class SmpService {
         beginTeleport(player, spawn(), "Willkommen am Spawn!");
     }
 
-    /** Stands still for the configured warmup, then teleports. Movement or leaving the SMP cancels it. */
+    // ---------------------------------------------------------------- tpa
+
+    public void requestTpa(Player player, String targetName) {
+        if (!isActive(player)) {
+            Messages.send(player, Messages.Type.ERROR, "/tpa funktioniert nur im SMP. Betritt es über den Kompass.");
+            return;
+        }
+        Player target = Bukkit.getPlayerExact(targetName);
+        if (target == null || !isActive(target)) {
+            Messages.send(player, Messages.Type.ERROR, "„" + targetName + "“ ist nicht im SMP.");
+            return;
+        }
+        if (target.equals(player)) {
+            Messages.send(player, Messages.Type.ERROR, "Du kannst dich nicht zu dir selbst teleportieren.");
+            return;
+        }
+        tpaRequests.put(target.getUniqueId(),
+                new TpaRequest(player.getUniqueId(), System.currentTimeMillis() + TPA_EXPIRY_MILLIS));
+        Messages.send(player, Messages.Type.SUCCESS, "Teleportanfrage an " + target.getName()
+                + " gesendet. Sie gilt 60 Sekunden.");
+        Messages.send(target, Messages.Type.INFO, player.getName() + " möchte sich zu dir teleportieren.");
+        target.sendMessage(net.kyori.adventure.text.Component.text()
+                .append(tpaButton("Annehmen", net.kyori.adventure.text.format.NamedTextColor.GREEN, "/tpaccept"))
+                .append(net.kyori.adventure.text.Component.space())
+                .append(tpaButton("Ablehnen", net.kyori.adventure.text.format.NamedTextColor.RED, "/tpdeny"))
+                .build());
+    }
+
+    public void acceptTpa(Player target) {
+        TpaRequest request = tpaRequests.remove(target.getUniqueId());
+        if (request == null || request.expires() < System.currentTimeMillis()) {
+            Messages.send(target, Messages.Type.ERROR, "Du hast keine offene Teleportanfrage.");
+            return;
+        }
+        Player requester = Bukkit.getPlayer(request.from());
+        if (requester == null || !isActive(requester)) {
+            Messages.send(target, Messages.Type.ERROR, "Der Spieler ist nicht mehr im SMP.");
+            return;
+        }
+        if (!isActive(target)) {
+            Messages.send(target, Messages.Type.ERROR, "Du bist nicht mehr im SMP.");
+            return;
+        }
+        Messages.send(target, Messages.Type.SUCCESS, "Du hast die Anfrage von " + requester.getName() + " angenommen.");
+        Messages.send(requester, Messages.Type.SUCCESS, target.getName() + " hat deine Teleportanfrage angenommen.");
+        UUID targetId = target.getUniqueId();
+        beginTeleport(requester, () -> {
+            Player current = Bukkit.getPlayer(targetId);
+            return current != null && isActive(current) ? current.getLocation() : null;
+        }, "Teleportiert zu " + target.getName() + "!");
+    }
+
+    public void denyTpa(Player target) {
+        TpaRequest request = tpaRequests.remove(target.getUniqueId());
+        if (request == null || request.expires() < System.currentTimeMillis()) {
+            Messages.send(target, Messages.Type.ERROR, "Du hast keine offene Teleportanfrage.");
+            return;
+        }
+        Messages.send(target, Messages.Type.INFO, "Teleportanfrage abgelehnt.");
+        Player requester = Bukkit.getPlayer(request.from());
+        if (requester != null) {
+            Messages.send(requester, Messages.Type.ERROR, target.getName() + " hat deine Teleportanfrage abgelehnt.");
+        }
+    }
+
+    private static net.kyori.adventure.text.Component tpaButton(String label,
+                                                                net.kyori.adventure.text.format.NamedTextColor color,
+                                                                String command) {
+        return net.kyori.adventure.text.Component.text("[" + label + "]", color,
+                        net.kyori.adventure.text.format.TextDecoration.BOLD)
+                .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand(command))
+                .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(
+                        net.kyori.adventure.text.Component.text(command, net.kyori.adventure.text.format.NamedTextColor.GRAY)));
+    }
+
     private void beginTeleport(Player player, Location destination, String arrivalMessage) {
+        beginTeleport(player, () -> destination, arrivalMessage);
+    }
+
+    /**
+     * Stands still for the configured warmup, then teleports. Movement or leaving the SMP cancels it.
+     * The destination is resolved when the warmup ends; a null destination aborts the teleport.
+     */
+    private void beginTeleport(Player player, Supplier<Location> destination, String arrivalMessage) {
         cancelTeleportWarmup(player, null);
         int seconds = Math.max(0, plugin.getConfig().getInt("smp.home-warmup-seconds", 3));
         if (seconds == 0 || isEditing(player) || player.getGameMode() == GameMode.SPECTATOR) {
-            teleportNow(player, destination, arrivalMessage);
+            teleportResolved(player, destination, arrivalMessage);
             return;
         }
         Location start = player.getLocation();
@@ -472,9 +600,18 @@ public final class SmpService {
             }
             if (--remaining[0] > 0) return;
             cancelTeleportWarmup(player, null);
-            teleportNow(player, destination, arrivalMessage);
+            teleportResolved(player, destination, arrivalMessage);
         }, 10L, 10L);
         teleportWarmups.put(player.getUniqueId(), task);
+    }
+
+    private void teleportResolved(Player player, Supplier<Location> destination, String arrivalMessage) {
+        Location location = destination.get();
+        if (location == null) {
+            Messages.send(player, Messages.Type.ERROR, "Teleport abgebrochen, das Ziel ist nicht mehr erreichbar.");
+            return;
+        }
+        teleportNow(player, location, arrivalMessage);
     }
 
     private void teleportNow(Player player, Location destination, String arrivalMessage) {
@@ -529,6 +666,16 @@ public final class SmpService {
                     + exception.getMessage());
         }
         boolean loaded = loadWorlds();
+        if (loaded) {
+            for (Runnable listener : reloadListeners) {
+                try {
+                    listener.run();
+                } catch (RuntimeException exception) {
+                    plugin.getLogger().log(java.util.logging.Level.SEVERE,
+                            "SMP-Daten konnten nach der Wartung nicht neu geladen werden.", exception);
+                }
+            }
+        }
         available = loaded;
         if (!loaded) plugin.getLogger().severe("SMP-Welten konnten nach der Wartung nicht geladen werden.");
         return loaded;

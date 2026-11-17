@@ -102,3 +102,83 @@ val challengeHudTest = tasks.register<JavaExec>("challengeHudTest") {
     javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
 }
 tasks.check { dependsOn(challengeHudTest) }
+
+val challengeKeepAliveTest = tasks.register<JavaExec>("challengeKeepAliveTest") {
+    group = "verification"
+    description = "Checks the /keepalive switch and the 30-minute AFK/offline timeout."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.challenge.ChallengeKeepAliveTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(challengeKeepAliveTest) }
+
+val performancePolicyTest = tasks.register<JavaExec>("performancePolicyTest") {
+    group = "verification"
+    description = "Checks world queue ordering, failure/shutdown recovery and unchanged scoreboard updates."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.util.PerformancePolicyTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(performancePolicyTest) }
+
+val economyTest = tasks.register<JavaExec>("economyTest") {
+    group = "verification"
+    description = "Checks the sell market curve, the shipped value list and the daily shop rotation."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.smp.EconomyTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(economyTest) }
+
+val claimRulesTest = tasks.register<JavaExec>("claimRulesTest") {
+    group = "verification"
+    description = "Checks plot sizes, prices, overlap and spawn distance."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.smp.ClaimRulesTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(claimRulesTest) }
+
+// Opt-in only: this plugin creates disposable worlds and stops its test server when finished.
+tasks.register<Jar>("performanceSmokeJar") {
+    group = "verification"
+    description = "Builds an integration-test plugin for an isolated disposable Paper server."
+    dependsOn(npcTest.classesTaskName)
+    archiveFileName.set("PerformanceServerSmoke.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("smoke"))
+    from(npcTest.output) { include("de/carl/minecraftchallenges/smoke/**") }
+    from("src/serverSmoke") { include("plugin.yml") }
+}
+
+// Opt-in only, like the performance smoke: boots a disposable server and checks the SMP systems on it.
+tasks.register<Jar>("smpSmokeJar") {
+    group = "verification"
+    description = "Builds the SMP integration-test plugin for an isolated disposable Paper server."
+    dependsOn(npcTest.classesTaskName)
+    archiveFileName.set("SmpServerSmoke.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("smoke"))
+    from(npcTest.output) { include("de/carl/minecraftchallenges/smoke/SmpServerSmoke*") }
+    from("src/smpSmoke") { include("plugin.yml") }
+}
+
+val readyClickTest = tasks.register<JavaExec>("readyClickTest") {
+    group = "verification"
+    description = "Checks ready toggles against duplicate block-use and off-hand events."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.util.ReadyClickGateTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(readyClickTest) }
+
+val deployScriptTest = tasks.register<Exec>("deployScriptTest") {
+    group = "verification"
+    description = "Checks SFTP replacement/rollback, world locks, checksums and Kinetic API power-state handling."
+    workingDir(layout.projectDirectory)
+    commandLine("python3", "-m", "unittest", "discover", "-s", "scripts/tests")
+}
+tasks.check { dependsOn(deployScriptTest) }

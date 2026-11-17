@@ -36,6 +36,24 @@ public final class WorldLoader {
                 .thenAccept(chunks -> chunks.forEach(chunk -> chunk.addPluginChunkTicket(plugin)));
     }
 
+    /** Retain already loaded waiting chunks without synchronously generating missing terrain. */
+    public static void retainSpawn(Plugin plugin, World world) {
+        if (world == null) return;
+        Location spawn = world.getSpawnLocation();
+        int cx = spawn.getBlockX() >> 4;
+        int cz = spawn.getBlockZ() >> 4;
+        for (int x = cx - WAITING_AREA_RADIUS_CHUNKS; x <= cx + WAITING_AREA_RADIUS_CHUNKS; x++) {
+            for (int z = cz - WAITING_AREA_RADIUS_CHUNKS; z <= cz + WAITING_AREA_RADIUS_CHUNKS; z++) {
+                if (world.isChunkLoaded(x, z)) world.addPluginChunkTicket(x, z, plugin);
+            }
+        }
+    }
+
+    /** Let normal player proximity manage chunks once the waiting phase ends. */
+    public static void releaseSpawn(Plugin plugin, World world) {
+        if (world != null) world.removePluginChunkTickets(plugin);
+    }
+
     public static CompletableFuture<List<Chunk>> loadArea(World world, Location center, int radiusChunks) {
         int centerX = center.getBlockX() >> 4;
         int centerZ = center.getBlockZ() >> 4;

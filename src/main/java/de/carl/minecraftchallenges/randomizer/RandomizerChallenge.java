@@ -1,10 +1,13 @@
 package de.carl.minecraftchallenges.randomizer;
 
 import de.carl.minecraftchallenges.MinecraftChallengesPlugin;
+import de.carl.minecraftchallenges.challenge.ChallengeKeepAlive;
 import de.carl.minecraftchallenges.challenge.ChallengeState;
+import de.carl.minecraftchallenges.challenge.PlayerSnapshot;
 import de.carl.minecraftchallenges.challenge.ChallengeDuration;
 import de.carl.minecraftchallenges.challenge.ChallengeSessionService;
 import de.carl.minecraftchallenges.lobby.GameInstance;
+import de.carl.minecraftchallenges.lobby.KeepAliveChallenge;
 import de.carl.minecraftchallenges.lobby.GameType;
 import de.carl.minecraftchallenges.menu.MenuItems;
 import de.carl.minecraftchallenges.rank.RankService;
@@ -13,6 +16,7 @@ import de.carl.minecraftchallenges.util.Messages;
 import de.carl.minecraftchallenges.util.TimeFormatter;
 import de.carl.minecraftchallenges.util.WorldFiles;
 import de.carl.minecraftchallenges.util.WorldLoader;
+import de.carl.minecraftchallenges.util.ScoreboardUpdates;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -33,7 +37,6 @@ import org.bukkit.inventory.Recipe;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.block.Block;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.Criteria;
 import org.bukkit.scoreboard.DisplaySlot;
@@ -53,9 +56,9 @@ import java.util.UUID;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
 
-public final class RandomizerChallenge implements GameInstance, RandomizedWorld {
-    private static final int EMPTY_ROUND_RESET_SECONDS = 10 * 60;
+public final class RandomizerChallenge implements KeepAliveChallenge, RandomizedWorld {
     public static final int MAX_PLAYERS = 20;
     public static final int ADMIN_START_SLOT = 11;
     public static final int ADMIN_TIME_SLOT = 13;
@@ -83,7 +86,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
     private final Map<UUID, Integer> skips = new HashMap<>();
     private final Map<UUID, Material> targets = new HashMap<>();
     private final RandomMappings mappings = new RandomMappings();
-    private final Map<UUID, PlayerRunSnapshot> savedPlayerStates = new HashMap<>();
+    private final Map<UUID, PlayerSnapshot> savedPlayerStates = new HashMap<>();
     private final Map<UUID, Location> lastChallengeLocations = new HashMap<>();
     private final Map<UUID, BossBar> timeBossBars = new HashMap<>();
     private final Set<String> displayedScoreEntries = new HashSet<>();
@@ -95,14 +98,15 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
     private BukkitTask timerTask;
     private int elapsedSeconds;
     private int remainingSeconds;
-    private int emptyRoundSeconds;
+    private final ChallengeKeepAlive keepAlive = new ChallengeKeepAlive();
     private boolean readyCountdown;
     private int idleSeconds;
     private BukkitTask borderDisableTask;
     private Scoreboard scoreboard;
     private Objective scoreObjective;
-    private Runnable worldsInitializedHook = () -> { };
+    private Supplier<CompletableFuture<Void>> worldsInitializedHook = () -> CompletableFuture.completedFuture(null);
     private CompletableFuture<Boolean> preparation;
+    private final Map<World.Environment, CompletableFuture<World>> dimensionPreparations = new HashMap<>();
     private static final double MAX_BORDER_SIZE = 59_999_968.0;
     private static final double BORDER_TARGET_SIZE = 320.0;
     private static final long BORDER_ANIMATION_SECONDS = 30L;
@@ -129,31 +133,23 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
                 + " wird geladen; falls sie fehlt, wird sie erstellt.");
         world = createWorld(worldName, World.Environment.NORMAL);
         if (world == null) return false;
-        if (type.beatMinecraft()) {
-            nether = createWorld(worldName + "_nether", World.Environment.NETHER);
-            end = createWorld(worldName + "_end", World.Environment.THE_END);
-            if (nether == null || end == null) return false;
-        }
-        preparation = null;
         return true;
     }
 
     @Override
     public CompletableFuture<Boolean> prepare() {
-        boolean loaded = isLoaded(world) && (!type.beatMinecraft() || (isLoaded(nether) && isLoaded(end)));
-        if (preparation != null && loaded && !preparation.isCompletedExceptionally()) return preparation;
-        if (!ensureWorlds()) return CompletableFuture.completedFuture(false);
-        preparation = WorldLoader.preloadSpawn(plugin, world).thenApply(ignored -> {
-            activateWaitingBorder();
-            worldsInitializedHook.run();
-            return true;
+        if (preparation != null && !preparation.isCompletedExceptionally()
+                && (!preparation.isDone() || isLoaded(world))) return preparation;
+        preparation = plugin.worldPreparation().submit(() -> {
+            if (!isLoaded(world) && !initializeWorlds()) return CompletableFuture.completedFuture(false);
+            return WorldLoader.preloadSpawn(plugin, world)
+                    .thenCompose(ignored -> worldsInitializedHook.get())
+                    .thenApply(ignored -> {
+                        activateWaitingBorder();
+                        return true;
+                    });
         });
         return preparation;
-    }
-
-    private boolean ensureWorlds() {
-        boolean loaded = isLoaded(world) && (!type.beatMinecraft() || (isLoaded(nether) && isLoaded(end)));
-        return loaded || initializeWorlds();
     }
 
     private static boolean isLoaded(World candidate) {
@@ -191,7 +187,9 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
 
     @Override
     public void tickIdle(int idleUnloadSeconds) {
-        boolean idle = world != null && presentPlayers().isEmpty()
+        boolean idle = (preparation == null || preparation.isDone())
+                && dimensionPreparations.values().stream().allMatch(CompletableFuture::isDone)
+                && world != null && presentPlayers().isEmpty()
                 && (state == ChallengeState.IDLE || state == ChallengeState.WAITING
                 || state == ChallengeState.FINISHED);
         if (!idle) {
@@ -232,6 +230,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         world = null;
         nether = null;
         end = null;
+        dimensionPreparations.clear();
         state = ChallengeState.IDLE;
         return true;
     }
@@ -271,12 +270,12 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
             Messages.send(player, Messages.Type.INFO, "Die Welt wird gerade neu generiert.");
             return;
         }
-        if (!ensureWorlds()) {
+        if (!isLoaded(world)) {
             Messages.send(player, Messages.Type.ERROR,
                     "Die Welt von " + displayName() + " ist nicht verfügbar.");
             return;
         }
-        if (isRoundActive()) {
+        if (state == ChallengeState.RUNNING) {
             if (participants.contains(player.getUniqueId())) rejoinParticipant(player);
             else joinSpectator(player);
             return;
@@ -322,19 +321,19 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
 
     private void rejoinParticipant(Player player) {
         UUID uuid = player.getUniqueId();
+        Location savedLocation = lastChallengeLocations.get(uuid);
+        if (!player.teleport(savedLocation != null && ownsWorld(savedLocation.getWorld())
+                ? savedLocation : spawn(world))) return;
         spectators.remove(uuid);
         player.closeInventory();
         player.getInventory().clear();
-        player.setAllowFlight(false);
         player.setFlying(false);
-        player.teleport(spawn(world));
+        player.setAllowFlight(false);
         assignScoreboard(player);
         if (isRunning()) {
             player.setGameMode(GameMode.SURVIVAL);
-            Location savedLocation = lastChallengeLocations.get(uuid);
-            if (savedLocation != null && ownsWorld(savedLocation.getWorld())) player.teleport(savedLocation);
-            PlayerRunSnapshot snapshot = savedPlayerStates.get(uuid);
-            if (snapshot != null) restoreRunSnapshot(player, snapshot);
+            PlayerSnapshot snapshot = savedPlayerStates.remove(uuid);
+            if (snapshot != null) snapshot.restore(player);
             else if (type == RandomizerType.CRAFTING) giveSkip(player);
             updateActionBar(player);
             updateTimeBossBar(player);
@@ -427,7 +426,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
     private void beginRound() {
         state = ChallengeState.RUNNING;
         sessions.claim(participants, sessionKey(), displayName());
-        emptyRoundSeconds = 0;
+        keepAlive.roundStarted();
         readyCountdown = false;
         ready.clear();
         elapsedSeconds = 0;
@@ -436,6 +435,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         scores.replaceAll((uuid, ignored) -> 0);
         updateScoreboard();
         animateBorderOpening();
+        WorldLoader.releaseSpawn(plugin, world);
         if (type == RandomizerType.CRAFTING) mappings.shuffleRecipes();
         else if (type == RandomizerType.BLOCK_DROP) mappings.shuffleBlockDrops();
         for (Player player : onlineParticipants()) {
@@ -453,23 +453,39 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
             player.sendTitle("§aLOS!", "§f" + type.displayName(), 0, 30, 10);
         }
         timerTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            if (checkEmptyRoundTimeout()) return;
+            if (checkInactivityTimeout()) return;
             elapsedSeconds++;
             if (remainingSeconds > 0 && --remainingSeconds <= 0) finish("Zeit abgelaufen");
             else updateActionBars();
         }, 20L, 20L);
     }
 
-    private boolean checkEmptyRoundTimeout() {
-        if (!onlineParticipants().isEmpty()) {
-            emptyRoundSeconds = 0;
-            return false;
+    private boolean checkInactivityTimeout() {
+        List<Player> present = onlineParticipants();
+        switch (keepAlive.tick(!present.isEmpty(), plugin.playerActivity().latest(present))) {
+            case SAVE -> saveForKeepAlive();
+            case EXPIRED -> {
+                String reason = ChallengeKeepAlive.INACTIVITY_TIMEOUT_MINUTES + " Minuten ohne aktive Teilnehmer";
+                plugin.getLogger().info(displayName() + " wurde nach " + reason + " beendet.");
+                finish("Automatisch beendet: " + reason);
+                return true;
+            }
+            case CONTINUE -> { }
         }
-        if (++emptyRoundSeconds < EMPTY_ROUND_RESET_SECONDS) return false;
-        plugin.getLogger().info(displayName()
-                + " wurde nach 10 Minuten ohne Teilnehmer zurückgesetzt.");
-        finish("Automatisch zurückgesetzt: 10 Minuten ohne Teilnehmer");
-        return true;
+        return false;
+    }
+
+    @Override
+    public ChallengeKeepAlive keepAlive() {
+        return keepAlive;
+    }
+
+    @Override
+    public void saveForKeepAlive() {
+        for (World owned : new World[] {world, nether, end}) {
+            if (owned != null && isLoaded(owned)) owned.save();
+        }
+        onlineParticipants().forEach(Player::saveData);
     }
 
     @Override
@@ -528,7 +544,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         timerTask = null;
         state = ChallengeState.FINISHED;
         sessions.release(participants, sessionKey());
-        emptyRoundSeconds = 0;
+        keepAlive.roundEnded();
         hideAllTimeBossBars();
         activateWaitingBorder();
         String result = reason + " – Spielzeit: " + TimeFormatter.gameTime(elapsedSeconds);
@@ -704,26 +720,21 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
 
     /** Unloads on the main thread, deletes the folders asynchronously, then creates the new worlds. */
     private CompletableFuture<Void> recreateWorlds() {
-        List<World> worlds = new ArrayList<>();
-        worlds.add(world);
-        if (nether != null) worlds.add(nether);
-        if (end != null) worlds.add(end);
         Map<String, Path> folders = new HashMap<>();
-        for (World loaded : worlds) {
-            folders.put(loaded.getName(), loaded.getWorldFolder().toPath());
-            if (!Bukkit.unloadWorld(loaded, false)) {
+        for (String name : worldNames()) {
+            World loaded = Bukkit.getWorld(name);
+            folders.put(name, loaded == null ? null : loaded.getWorldFolder().toPath());
+            if (loaded != null && !Bukkit.unloadWorld(loaded, false)) {
                 return CompletableFuture.failedFuture(
-                        new IllegalStateException("Welt konnte nicht entladen werden: " + loaded.getName()));
+                        new IllegalStateException("Welt konnte nicht entladen werden: " + name));
             }
         }
         world = null; nether = null; end = null;
         preparation = null;
-        CompletableFuture<?>[] deletions = folders.entrySet().stream()
+        dimensionPreparations.clear();
+        return CompletableFuture.allOf(folders.entrySet().stream()
                 .map(entry -> WorldFiles.deleteUnloadedWorldAsync(plugin, entry.getKey(), entry.getValue()))
-                .toArray(CompletableFuture[]::new);
-        return CompletableFuture.allOf(deletions).thenRun(() -> {
-            if (!initializeWorlds()) throw new IllegalStateException("Neue Welt konnte nicht erstellt werden");
-        });
+                .toArray(CompletableFuture[]::new));
     }
 
     public void playerLeft(Player player) {
@@ -753,47 +764,13 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
     }
 
     private void saveRunSnapshot(Player player) {
-        if (!isRunning() || !isParticipant(player)) return;
+        if (!isRunning() || !isParticipant(player) || player.isDead()) return;
         UUID uuid = player.getUniqueId();
-        if (!ownsWorld(player.getWorld()) && savedPlayerStates.containsKey(uuid)) return;
-        savedPlayerStates.put(uuid, new PlayerRunSnapshot(
-                cloneContents(player.getInventory().getContents()),
-                cloneContents(player.getInventory().getArmorContents()),
-                cloneContents(player.getInventory().getExtraContents()),
-                player.getInventory().getHeldItemSlot(), player.getHealth(), player.getAbsorptionAmount(),
-                player.getFoodLevel(), player.getSaturation(), player.getExhaustion(),
-                player.getLevel(), player.getExp(), player.getTotalExperience(),
-                player.getRemainingAir(), player.getFireTicks(), player.getFallDistance(),
-                List.copyOf(player.getActivePotionEffects())));
-        if (ownsWorld(player.getWorld())) lastChallengeLocations.put(uuid, player.getLocation().clone());
-    }
-
-    private static ItemStack[] cloneContents(ItemStack[] contents) {
-        ItemStack[] copy = new ItemStack[contents.length];
-        for (int index = 0; index < contents.length; index++) {
-            copy[index] = contents[index] == null ? null : contents[index].clone();
-        }
-        return copy;
-    }
-
-    private void restoreRunSnapshot(Player player, PlayerRunSnapshot snapshot) {
-        player.getInventory().setContents(cloneContents(snapshot.contents()));
-        player.getInventory().setArmorContents(cloneContents(snapshot.armorContents()));
-        player.getInventory().setExtraContents(cloneContents(snapshot.extraContents()));
-        player.getInventory().setHeldItemSlot(Math.max(0, Math.min(8, snapshot.heldSlot())));
-        player.setHealth(Math.max(0.1, Math.min(player.getMaxHealth(), snapshot.health())));
-        player.setAbsorptionAmount(Math.max(0.0, snapshot.absorption()));
-        player.setFoodLevel(Math.max(0, Math.min(20, snapshot.foodLevel())));
-        player.setSaturation(Math.max(0.0f, Math.min(snapshot.saturation(), player.getFoodLevel())));
-        player.setExhaustion(Math.max(0.0f, snapshot.exhaustion()));
-        player.setLevel(Math.max(0, snapshot.level()));
-        player.setExp(Math.max(0.0f, Math.min(1.0f, snapshot.experienceProgress())));
-        player.setTotalExperience(Math.max(0, snapshot.totalExperience()));
-        player.setRemainingAir(Math.max(0, Math.min(player.getMaximumAir(), snapshot.remainingAir())));
-        player.setFireTicks(snapshot.fireTicks());
-        player.setFallDistance(Math.max(0.0f, snapshot.fallDistance()));
-        player.getActivePotionEffects().forEach(effect -> player.removePotionEffect(effect.getType()));
-        player.addPotionEffects(snapshot.potionEffects());
+        // Login can trigger a second departure from the old world. Keep the original run state.
+        savedPlayerStates.computeIfAbsent(uuid, ignored -> {
+            if (ownsWorld(player.getWorld())) lastChallengeLocations.put(uuid, player.getLocation().clone());
+            return PlayerSnapshot.capture(player);
+        });
     }
 
     private void clearRunSnapshots() {
@@ -801,15 +778,9 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         lastChallengeLocations.clear();
     }
 
-    private record PlayerRunSnapshot(
-            ItemStack[] contents, ItemStack[] armorContents, ItemStack[] extraContents,
-            int heldSlot, double health, double absorption, int foodLevel, float saturation,
-            float exhaustion, int level, float experienceProgress, int totalExperience,
-            int remainingAir, int fireTicks, float fallDistance, List<PotionEffect> potionEffects
-    ) { }
-
     public void respawn(Player player) {
         Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!player.isOnline() || !ownsWorld(player.getWorld())) return;
             if (!participants.contains(player.getUniqueId())) return;
             if (isRunning()) {
                 player.setGameMode(GameMode.SURVIVAL);
@@ -830,13 +801,11 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
 
     private void giveWaitingItems(Player player) {
         player.getInventory().clear();
+        player.getInventory().setItem(3,
+                tagged(Material.RED_BED, "Zur Lobby", NamedTextColor.RED, backKey));
         if (ranks.canManageChallenge(player)) {
-            player.getInventory().setItem(3,
-                    tagged(Material.RED_BED, "Zur Lobby", NamedTextColor.RED, backKey));
             player.getInventory().setItem(5, tagged(Material.COMPARATOR, "Challenge verwalten", NamedTextColor.GOLD, adminKey));
         } else {
-            player.getInventory().setItem(4,
-                    tagged(Material.RED_BED, "Zur Lobby", NamedTextColor.RED, backKey));
             boolean isReady = ready.contains(player.getUniqueId());
             player.getInventory().setItem(5, tagged(isReady ? Material.RED_STAINED_GLASS_PANE
                     : Material.LIME_STAINED_GLASS_PANE, isReady ? "Abbrechen" : "Bereitmachen",
@@ -926,7 +895,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
             case FINISHED -> "Ergebnis";
             case REGENERATING -> "Generiert...";
         };
-        scoreObjective.displayName(Component.text(type.displayName() + " #" + lobbyId + " • " + phase,
+        ScoreboardUpdates.title(scoreObjective, Component.text(type.displayName() + " #" + lobbyId + " • " + phase,
                 NamedTextColor.GOLD));
         Set<String> currentEntries = new HashSet<>();
         int position = participants.size();
@@ -940,7 +909,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
             currentEntries.add(entry);
             int value = type == RandomizerType.CRAFTING
                     ? scores.getOrDefault(uuid, 0) : position--;
-            scoreObjective.getScore(entry).setScore(value);
+            ScoreboardUpdates.score(scoreObjective, entry, value);
         }
         displayedScoreEntries.stream().filter(entry -> !currentEntries.contains(entry))
                 .forEach(scoreboard::resetScores);
@@ -993,6 +962,7 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
 
     private void activateWaitingBorder() {
         if (world == null) return;
+        WorldLoader.retainSpawn(plugin, world);
         cancelBorderTask();
         double radius = Math.max(5.0,
                 plugin.getConfig().getDouble("challenge.waiting-world-border-radius", 40.0));
@@ -1021,14 +991,52 @@ public final class RandomizerChallenge implements GameInstance, RandomizedWorld 
         borderDisableTask = null;
     }
 
+    public World readyPortalWorld(World.Environment environment) {
+        if (environment == World.Environment.NORMAL) return isLoaded(world) ? world : null;
+        CompletableFuture<World> pending = dimensionPreparations.get(environment);
+        if (pending == null || !pending.isDone() || pending.isCompletedExceptionally()) return null;
+        World target = environment == World.Environment.NETHER ? nether : end;
+        return isLoaded(target) ? target : null;
+    }
+
+    /** Prepares the destination; the listener lets vanilla perform the actual portal transfer. */
+    public CompletableFuture<Location> portalTarget(World.Environment environment) {
+        World owner = world;
+        if (!isLoaded(owner)) return CompletableFuture.completedFuture(null);
+        CompletableFuture<World> destination;
+        if (environment == World.Environment.NORMAL) destination = CompletableFuture.completedFuture(owner);
+        else destination = dimensionPreparations.computeIfAbsent(environment, ignored ->
+                plugin.worldPreparation().submit(() -> {
+                    if (world != owner || !isLoaded(owner) || !isRunning()) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    String suffix = environment == World.Environment.NETHER ? "_nether" : "_end";
+                    World created = createWorld(worldName + suffix, environment);
+                    if (environment == World.Environment.NETHER) nether = created;
+                    else end = created;
+                    if (created == null) return CompletableFuture.failedFuture(
+                            new IllegalStateException("Dimension konnte nicht erstellt werden"));
+                    return WorldLoader.loadArea(created, created.getSpawnLocation(), 1).thenApply(chunks -> created);
+                }));
+        return destination.thenCompose(target -> {
+            if (target == null || world != owner || !isLoaded(target)) return CompletableFuture.completedFuture(null);
+            return WorldLoader.loadArea(target, target.getSpawnLocation(), 1)
+                    .thenApply(chunks -> world == owner && isLoaded(target)
+                            ? target.getSpawnLocation().add(0.5, 1, 0.5) : null);
+        }).whenComplete((target, error) -> {
+            if (target == null || error != null) dimensionPreparations.remove(environment, destination);
+        });
+    }
+
     public World overworld() { return world; }
     public World nether() { return nether; }
     public World end() { return end; }
-    public void onWorldsInitialized(Runnable hook) {
+    public void onWorldsInitialized(Supplier<CompletableFuture<Void>> hook) {
         worldsInitializedHook = Objects.requireNonNull(hook);
     }
     @Override
     public void shutdown() {
+        keepAlive.roundEnded();
         if (countdownTask != null) countdownTask.cancel();
         if (timerTask != null) timerTask.cancel();
         cancelBorderTask();

@@ -20,12 +20,12 @@ public final class QuickJoinTest {
         expect(empty, List.of(lobby(2, 0, 8, ChallengeState.WAITING), empty), "Empty ties use first lobby number");
         expect(populated, List.of(populated, lobby(1, 8, 8, ChallengeState.WAITING)), "Skip full lobbies");
         expect(empty, List.of(empty, lobby(2, 6, 8, ChallengeState.RUNNING),
-                lobby(3, 7, 8, ChallengeState.COUNTDOWN), lobby(4, 5, 8, ChallengeState.REGENERATING)),
-                "Skip active rounds and regenerating worlds");
+                lobby(4, 5, 8, ChallengeState.REGENERATING)),
+                "Skip running rounds and regenerating worlds");
         expect(null, List.of(), "Empty registry opens menu");
         expect(null, List.of(lobby(1, 8, 8, ChallengeState.WAITING)), "All full opens menu");
         var finished = lobby(2, 2, 8, ChallengeState.FINISHED);
-        expect(finished, List.of(empty, finished), "Finished rounds accept new players");
+        expect(empty, List.of(empty, finished), "Finished rounds are not Quick Join targets");
         var closed = new Fake(GameType.CUSTOM, 1, 0, 8, ChallengeState.IDLE);
         var custom = new Fake(GameType.CUSTOM, 2, 3, 8, ChallengeState.WAITING);
         expect(null, List.of(closed), "Closed custom slots have no Quick Join");
@@ -35,20 +35,28 @@ public final class QuickJoinTest {
         Player player = (Player) Proxy.newProxyInstance(Player.class.getClassLoader(), new Class<?>[] {Player.class},
                 (proxy, method, values) -> { throw new AssertionError("Unexpected player access: " + method); });
         var running = new Fake(null, 3, 8, 8, ChallengeState.RUNNING, true);
-        expect(running, List.of(populated, empty, running), player, "Own running round takes priority even when full");
+        expect(populated, List.of(populated, empty, running), player, "Own running rounds are never Quick Join targets");
         var countdown = new Fake(null, 2, 2, 8, ChallengeState.COUNTDOWN, true);
-        expect(countdown, List.of(populated, countdown), player, "Own countdown can be rejoined");
+        expect(populated, List.of(populated, countdown), player, "Most populated wins over previous countdown membership");
         expect(populated, List.of(populated, lobby(3, 4, 8, ChallengeState.RUNNING)), player,
                 "Non-participants still use public lobby selection");
         var runningCustom = new Fake(GameType.CUSTOM, 2, 8, 8, ChallengeState.RUNNING, true);
-        expect(runningCustom, List.of(closed, runningCustom), player, "Rejoin own running custom challenge");
+        expect(null, List.of(closed, runningCustom), player, "Own running custom challenge cannot be Quick Joined");
         expect(null, List.of(new Fake(GameType.CUSTOM, 2, 4, 8, ChallengeState.RUNNING)), player,
                 "Other players cannot Quick Join a running custom challenge");
         expect(empty, List.of(empty, new Fake(null, 2, 4, 8, ChallengeState.REGENERATING, true)), player,
                 "Previous membership does not allow rejoining regeneration");
         expect(populated, List.of(populated, new Fake(null, 3, 0, 8, ChallengeState.FINISHED, true)), player,
                 "Previous membership does not prioritize a completed round");
-        System.out.println("17 NPC Quick Join regression checks passed.");
+        var busyCountdown = lobby(5, 7, 8, ChallengeState.COUNTDOWN);
+        expect(busyCountdown, List.of(populated, busyCountdown), "Prefer a busier countdown over a waiting lobby");
+        expect(populated, List.of(populated, countdown), "Prefer a busier waiting lobby over a countdown");
+        expect(populated, List.of(populated, lobby(1, 8, 8, ChallengeState.COUNTDOWN)), "Skip full countdowns");
+        expect(null, List.of(running), player, "No fallback to an own running round when no lobby is open");
+        expect(null, List.of(finished), "No fallback to finished rounds");
+        var customCountdown = new Fake(GameType.CUSTOM, 3, 4, 8, ChallengeState.COUNTDOWN);
+        expect(customCountdown, List.of(custom, customCountdown), "Custom countdowns accept Quick Join participants");
+        System.out.println("23 NPC Quick Join regression checks passed.");
     }
 
     private static Fake lobby(int id, int players, int max, ChallengeState state) {

@@ -42,6 +42,8 @@ import java.util.*;
 /** Lobby NPCs use native player-shaped mannequins; no packet or NPC plugin dependency. */
 @SuppressWarnings("UnstableApiUsage")
 public final class NpcService implements Listener, CommandExecutor {
+    private static final double TOP_LABEL_HEIGHT = 2.90;
+    private static final Component NO_HIGHSCORE = Component.text("Noch kein Highscore", NamedTextColor.GREEN);
     private final MinecraftChallengesPlugin plugin;
     private final LobbyService lobby;
     private final GameLobbyRegistry registry;
@@ -52,6 +54,8 @@ public final class NpcService implements Listener, CommandExecutor {
     private final NamespacedKey entityKey;
     private final Map<UUID, Definition> definitions = new LinkedHashMap<>();
     private final Map<UUID, Actors> actors = new HashMap<>();
+    private final Map<UUID, Map<UUID, LookState>> sentLooks = new HashMap<>();
+    private record LookState(NpcLookDirection direction, boolean onGround) { }
     private final Map<UUID, Set<UUID>> touching = new HashMap<>();
     private final Map<UUID, Long> cooldown = new HashMap<>();
     private final Map<UUID, UUID> dialogs = new HashMap<>();
@@ -65,11 +69,12 @@ public final class NpcService implements Listener, CommandExecutor {
     private record Definition(UUID id, Location location, String skin, String action, String command) {
         String title() { return actionName(action); }
     }
-    private record Actors(Mannequin body, TextDisplay title, TextDisplay hint, TextDisplay rejoinHint,
-                          TextDisplay population) {
+    private record Actors(Mannequin body, TextDisplay title, TextDisplay hint,
+                          TextDisplay population, Map<UUID, TextDisplay> highscores) {
         void remove() {
-            body.remove(); title.remove(); hint.remove(); population.remove();
-            if (rejoinHint != null) rejoinHint.remove();
+            body.remove(); title.remove(); hint.remove();
+            if (population != null) population.remove();
+            highscores.values().forEach(Entity::remove);
         }
     }
     private static final class Menu implements InventoryHolder {
@@ -151,7 +156,8 @@ public final class NpcService implements Listener, CommandExecutor {
         int slot = 10;
         for (GameType type : GameType.values()) {
             holder.actions.put(slot, type.name());
-            inventory.setItem(slot++, item(type.icon(), type.displayName(), "Links: Quick Join · Rechts: Lobby-Menü"));
+            inventory.setItem(slot++, item(type.icon(), type.displayName(), type == GameType.SPEEDRUN
+                    ? "Links / Berühren: Start · Rechts: Speedrun-Menü" : "Links: Quick Join · Rechts: Lobby-Menü"));
         }
         if (navigator.isJumpAndRunAvailable()) {
             holder.actions.put(20, "JUMP_AND_RUN");
@@ -329,16 +335,14 @@ public final class NpcService implements Listener, CommandExecutor {
             case "COMMAND" -> { player.closeInventory(); player.performCommand(def.command.replace("{player}", player.getName())); }
             default -> {
                 GameType type = GameType.valueOf(def.action);
-                var target = quick ? QuickJoin.select(registry.lobbies(type), player) : null;
-                if (target != null) { player.closeInventory(); registry.join(player, target); }
-                else if (type == GameType.CUSTOM) customMenu.openList(player);
-                else lobbyMenu.open(player, type);
+                navigator.selectGame(player, type, quick, lobbyMenu, customMenu);
             }
         }
     }
 
     private GameInstance quickJoinTarget(Definition def) {
-        if (def.action.equals("COMMAND") || def.action.equals("SMP") || def.action.equals("JUMP_AND_RUN")) return null;
+        if (def.action.equals("COMMAND") || def.action.equals("SMP") || def.action.equals("JUMP_AND_RUN")
+                || def.action.equals("SPEEDRUN")) return null;
         return QuickJoin.select(registry.lobbies(GameType.valueOf(def.action)));
     }
 
@@ -363,34 +367,23 @@ public final class NpcService implements Listener, CommandExecutor {
         if (ticks++ % 20 == 0) for (Definition def : definitions.values()) {
             Actors set = actors.get(def.id);
             if (set == null || !set.body.isValid() || !set.title.isValid() || !set.hint.isValid()
-                    || !set.population.isValid()
-                    || set.rejoinHint != null && !set.rejoinHint.isValid()) {
+                    || (set.population != null && !set.population.isValid())) {
                 if (set != null) set.remove();
                 spawn(def); set = actors.get(def.id);
             }
             if (set == null) continue;
-            Component population = populationText(def);
-            if (!population.equals(set.population.text())) set.population.text(population);
-            Component hint = Component.text(hasQuickJoin(def)
-                    ? "Linksklick: Quick Join · Rechtsklick: Lobby-Menü"
+            if (set.population != null) {
+                Component population = populationText(def);
+                if (!population.equals(set.population.text())) set.population.text(population);
+            }
+            Component hint = Component.text(def.action.equals("SPEEDRUN")
+                    ? "Links / Berühren: Start · Rechts: Speedrun-Menü"
+                    : hasQuickJoin(def) ? "Linksklick: Quick Join · Rechtsklick: Lobby-Menü"
                     : def.action.equals("COMMAND") ? "Rechtsklick oder Berühren"
                     : def.action.equals("JUMP_AND_RUN") || def.action.equals("SMP") ? "Klicken oder Berühren"
                     : "Klicken oder Berühren: Lobby-Menü", NamedTextColor.GRAY);
             if (!hint.equals(set.hint.text())) set.hint.text(hint);
-            if (set.rejoinHint != null) {
-                // Only returning participants see Quick Join when no public custom slot is joinable.
-                boolean publicJoin = hasQuickJoin(def);
-                for (Player viewer : Bukkit.getOnlinePlayers()) {
-                    boolean returning = !publicJoin && QuickJoin.select(registry.lobbies(GameType.CUSTOM), viewer) != null;
-                    if (returning) {
-                        viewer.hideEntity(plugin, set.hint);
-                        viewer.showEntity(plugin, set.rejoinHint);
-                    } else {
-                        viewer.showEntity(plugin, set.hint);
-                        viewer.hideEntity(plugin, set.rejoinHint);
-                    }
-                }
-            }
+            if (def.action.equals("SPEEDRUN")) updateSpeedrunHighscores(def, set);
         }
         if (ticks % 2 == 0) updateNpcLooks();
         for (Player player : Bukkit.getOnlinePlayers()) {
@@ -411,17 +404,56 @@ public final class NpcService implements Listener, CommandExecutor {
         }
     }
 
+    private void updateSpeedrunHighscores(Definition def, Actors set) {
+        Map<UUID, Player> viewers = new HashMap<>();
+        for (Player viewer : set.body.getTrackedBy()) {
+            if (viewer.isOnline() && viewer.getWorld() == set.body.getWorld() && viewer.canSee(set.body)) {
+                viewers.put(viewer.getUniqueId(), viewer);
+            }
+        }
+        var labels = viewers.isEmpty() ? Map.<UUID, Component>of()
+                : navigator.speedrunHighscoreLabels(viewers.keySet());
+        for (Player viewer : viewers.values()) {
+            UUID id = viewer.getUniqueId();
+            Component label = labels.getOrDefault(id, NO_HIGHSCORE);
+            TextDisplay display = set.highscores.get(id);
+            if (display == null || !display.isValid()) {
+                display = text(def, TOP_LABEL_HEIGHT, .65f, false);
+                display.text(label);
+                set.highscores.put(id, display);
+                viewer.showEntity(plugin, display);
+            } else if (!label.equals(display.text())) {
+                display.text(label);
+            }
+        }
+        set.highscores.entrySet().removeIf(entry -> {
+            if (viewers.containsKey(entry.getKey())) return false;
+            entry.getValue().remove();
+            return true;
+        });
+    }
+
     private void updateNpcLooks() {
+        Set<UUID> liveActors = new HashSet<>();
         for (Actors actor : actors.values()) {
             Mannequin npc = actor.body;
             if (!npc.isValid()) continue;
+            liveActors.add(npc.getUniqueId());
+            Map<UUID, LookState> sent = sentLooks.computeIfAbsent(npc.getUniqueId(), ignored -> new HashMap<>());
+            Set<UUID> visible = new HashSet<>();
             Location eyes = npc.getEyeLocation();
             for (Player viewer : npc.getTrackedBy()) {
                 if (!viewer.isOnline() || viewer.getWorld() != npc.getWorld() || !viewer.canSee(npc)) continue;
+                visible.add(viewer.getUniqueId());
                 Location target = viewer.getEyeLocation();
                 NpcLookDirection direction = NpcLookDirection.towards(target.getX() - eyes.getX(),
                         target.getY() - eyes.getY(), target.getZ() - eyes.getZ(), eyes.getYaw());
-                try { lookPackets.send(viewer, npc, direction); }
+                LookState next = new LookState(direction, npc.isOnGround());
+                if (next.equals(sent.get(viewer.getUniqueId())) && ticks % 20 != 0) continue;
+                try {
+                    lookPackets.send(viewer, npc, direction);
+                    sent.put(viewer.getUniqueId(), next);
+                }
                 catch (ReflectiveOperationException error) {
                     if (!lookErrorLogged) {
                         lookErrorLogged = true;
@@ -430,11 +462,18 @@ public final class NpcService implements Listener, CommandExecutor {
                     }
                 }
             }
+            sent.keySet().retainAll(visible);
         }
+        sentLooks.keySet().retainAll(liveActors);
     }
 
     @EventHandler public void onQuit(PlayerQuitEvent event) {
         UUID id = event.getPlayer().getUniqueId(); touching.remove(id); cooldown.remove(id); dialogs.remove(id);
+        sentLooks.values().forEach(viewers -> viewers.remove(id));
+        for (Actors set : actors.values()) {
+            TextDisplay display = set.highscores.remove(id);
+            if (display != null) display.remove();
+        }
     }
 
     private void mark(Entity entity, UUID id) {
@@ -452,29 +491,29 @@ public final class NpcService implements Listener, CommandExecutor {
                 if (entity.getPersistentDataContainer().has(entityKey)) entity.remove();
             }
         }
+        boolean speedrun = def.action.equals("SPEEDRUN");
         Mannequin body = world.spawn(def.location, Mannequin.class, npc -> {
             mark(npc, def.id); npc.setImmovable(true); npc.setGravity(false);
             npc.setAI(false); npc.setCollidable(false); npc.setInvulnerable(true); npc.setSilent(true);
             npc.setRemoveWhenFarAway(false); npc.setCanPickupItems(false); npc.setDescription(null);
             npc.setProfile(ResolvableProfile.resolvableProfile().name(def.skin).build());
+            if (speedrun) npc.customName(Component.empty());
         });
-        TextDisplay title = text(def, 2.55, 1.0f);
+        TextDisplay title = text(def, 2.55, 1.0f, true);
         title.text(Component.text(def.title(), NamedTextColor.GOLD));
-        TextDisplay hint = text(def, 2.23, .65f);
-        TextDisplay rejoinHint = null;
-        if (def.action.equals(GameType.CUSTOM.name())) {
-            rejoinHint = text(def, 2.23, .65f);
-            rejoinHint.setVisibleByDefault(false);
-            rejoinHint.text(Component.text("Linksklick: Quick Join · Rechtsklick: Lobby-Menü", NamedTextColor.GRAY));
+        TextDisplay hint = text(def, 2.23, .65f, true);
+        TextDisplay population = null;
+        if (!speedrun) {
+            population = text(def, TOP_LABEL_HEIGHT, .65f, true);
+            population.text(populationText(def));
         }
-        TextDisplay population = text(def, 2.90, .65f);
-        population.text(populationText(def));
-        actors.put(def.id, new Actors(body, title, hint, rejoinHint, population));
+        actors.put(def.id, new Actors(body, title, hint, population, new HashMap<>()));
     }
 
-    private TextDisplay text(Definition def, double height, float scale) {
+    private TextDisplay text(Definition def, double height, float scale, boolean visibleByDefault) {
         return def.location.getWorld().spawn(def.location.clone().add(0, height, 0), TextDisplay.class, text -> {
             mark(text, def.id); text.setBillboard(Display.Billboard.CENTER);
+            text.setVisibleByDefault(visibleByDefault);
             text.setShadowed(true); text.setDefaultBackground(false); text.setLineWidth(1000);
             var transform = text.getTransformation(); transform.getScale().set(scale);
             text.setTransformation(transform);
@@ -548,7 +587,7 @@ public final class NpcService implements Listener, CommandExecutor {
     }
 
     public void shutdown() {
-        ticker.cancel(); actors.values().forEach(Actors::remove); actors.clear();
+        ticker.cancel(); actors.values().forEach(Actors::remove); actors.clear(); sentLooks.clear();
         tickets.forEach(chunk -> chunk.removePluginChunkTicket(plugin)); tickets.clear();
         dialogs.clear(); touching.clear(); cooldown.clear();
     }

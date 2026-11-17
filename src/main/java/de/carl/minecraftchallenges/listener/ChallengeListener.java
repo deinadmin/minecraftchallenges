@@ -5,6 +5,7 @@ import de.carl.minecraftchallenges.challenge.ChallengeManager;
 import de.carl.minecraftchallenges.challenge.ChallengeState;
 import de.carl.minecraftchallenges.lobby.GameLobbyRegistry;
 import de.carl.minecraftchallenges.util.LobbyService;
+import de.carl.minecraftchallenges.util.ReadyClickGate;
 import de.carl.minecraftchallenges.util.Messages;
 import de.carl.minecraftchallenges.menu.AdminMenu;
 import de.carl.minecraftchallenges.menu.AdminMenuHolder;
@@ -43,6 +44,7 @@ import org.bukkit.inventory.ItemStack;
 public final class ChallengeListener implements Listener {
     private final MinecraftChallengesPlugin plugin;
     private final LobbyService lobby;
+    private final ReadyClickGate readyClicks = new ReadyClickGate();
     private final GameLobbyRegistry registry;
     private final AdminMenu adminMenu;
     // Item keys are shared by every Mob-Jagd lobby; this instance is only used to recognise them.
@@ -85,7 +87,10 @@ public final class ChallengeListener implements Listener {
         if (manager == null) return;
         if (items.isSpectatorCompass(item)) manager.openSpectatorMenu(player);
         else if (items.isStartItem(item)) adminMenu.open(player, manager);
-        else if (items.isReadyItem(item)) manager.toggleReady(player);
+        else if (items.isReadyItem(item)
+                && readyClicks.accept(player.getUniqueId(), event.getHand(), org.bukkit.Bukkit.getCurrentTick())) {
+            manager.toggleReady(player);
+        }
     }
 
     @EventHandler
@@ -261,6 +266,7 @@ public final class ChallengeListener implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        readyClicks.forget(player.getUniqueId());
         lobby.playerQuit(player);
         registry.mobHunts()
                 .filter(manager -> manager.isChallengeWorld(player.getWorld()) || manager.isParticipant(player))

@@ -40,6 +40,40 @@ smp:
   economy:
     starting-balance: 100
     currency: Coins
+  claims:
+    # So viele Grundstücke darf ein Spieler besitzen; jedes weitere kostet beim Kauf das Vielfache.
+    max-per-player: 3
+    extra-claim-multiplier: 2.0
+    # Radius ab der Mitte: 20 bedeutet 41×41 Blöcke. Jedes Upgrade vergrößert um upgrade-step.
+    start-radius: 20
+    upgrade-step: 10
+    # Erster Wert: Kaufpreis. Danach der Preis jedes Upgrades; die Liste bestimmt die größte Stufe.
+    prices: [150, 400, 1000, 2000, 3500, 5500, 8000]
+    # Abstand zum Spawnschutz und Mindestabstand neuer Grundstücke zu fremden, jeweils in Blöcken.
+    spawn-buffer: 30
+    min-gap: 15
+    # Festungen mit Endportal bleiben frei; 0 schaltet die Prüfung ab.
+    stronghold-buffer: 112
+    # So viel der bezahlten Coins gibt /claim abandon zurück.
+    refund-percent: 50
+  npcs:
+    # Quest-NPCs erscheinen einmal pro passendem Bauwerk (Netherfestung, Bastion, Endstadt, Monument …),
+    # sobald dessen Chunks geladen werden. false stoppt nur neue; vorhandene bleiben stehen.
+    quest-givers: true
+    # Nach einer gescheiterten oder abgebrochenen Quest ist nur dieser eine NPC so lange gesperrt.
+    quest-retry-hours: 24
+    traders:
+      max-active: 3
+      # Frühestens alle so viele Minuten erscheint ein neuer Händler, und nur wenn jemand im SMP ist.
+      spawn-interval-minutes: 30
+      # Entfernung vom SMP-Spawn in Blöcken.
+      min-distance: 250
+      max-distance: 2500
+      # Ein Händler läuft in einem Quadrat von so vielen Blöcken in jede Richtung um seinen Standort.
+      # Dort sind Abbauen, Bauen und neue Grundstücke gesperrt, solange er da ist.
+      roam-radius: 10
+      lifetime-hours-min: 24
+      lifetime-hours-max: 48
   backups:
     # relativ zum Serverordner
     folder: backups/smp
@@ -48,3 +82,10 @@ smp:
     keep-daily: 14
     keep-manual: 30
     keep-pre-restore: 5
+
+# Gemeinsames Budget für alle Schwammwelten; Spielregeln und Sichtweite bleiben unverändert.
+performance:
+  sponge:
+    max-in-flight-chunks: 4
+    blocks-per-tick: 2048
+    milliseconds-per-tick: 2.0

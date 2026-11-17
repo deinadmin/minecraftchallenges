@@ -42,13 +42,19 @@ public final class WorldFiles {
         }
         Path container = Bukkit.getWorldContainer().toPath().toAbsolutePath().normalize();
         Path primary = Bukkit.getWorlds().getFirst().getWorldFolder().toPath().toAbsolutePath().normalize();
+        // Paper 26.3 exposes the primary world's folder as
+        // <save>/dimensions/minecraft/overworld rather than the save root itself.
+        Path saveRoot = primary;
+        if (primary.endsWith(Path.of("dimensions", "minecraft", "overworld"))) {
+            saveRoot = primary.getParent().getParent().getParent();
+        }
         Set<Path> candidates = new LinkedHashSet<>();
         if (knownFolder != null) candidates.add(knownFolder.toAbsolutePath().normalize());
         candidates.add(container.resolve(worldName).normalize());
-        candidates.add(primary.resolve("dimensions").resolve("minecraft").resolve(worldName).normalize());
+        candidates.add(saveRoot.resolve("dimensions").resolve("minecraft").resolve(worldName).normalize());
         List<Path> folders = new ArrayList<>();
         for (Path folder : candidates) {
-            if (!folder.startsWith(container) || folder.equals(container) || folder.equals(primary)
+            if (!folder.startsWith(container) || folder.equals(container) || folder.equals(primary) || folder.equals(saveRoot)
                     || folder.getFileName() == null || !folder.getFileName().toString().equals(worldName)) {
                 throw new IOException("Unsicherer Weltpfad wurde nicht gelöscht: " + folder);
             }

@@ -13,24 +13,24 @@ public final class QuickJoin {
     private QuickJoin() { }
 
     public static GameInstance select(List<GameInstance> lobbies, Player player) {
-        if (player != null) {
-            GameInstance returning = lobbies.stream()
-                    .filter(GameInstance::isRoundActive)
-                    .filter(instance -> instance.isParticipant(player))
-                    .min(Comparator.comparingInt(GameInstance::lobbyId)).orElse(null);
-            if (returning != null) return returning;
-        }
         return select(lobbies);
     }
 
     public static GameInstance select(List<GameInstance> lobbies) {
         return lobbies.stream()
-                .filter(instance -> instance.gameType() != GameType.CUSTOM || instance.state() != ChallengeState.IDLE)
-                .filter(instance -> instance.state() == ChallengeState.WAITING
-                        || instance.state() == ChallengeState.FINISHED || instance.state() == ChallengeState.IDLE)
-                .filter(instance -> instance.onlineParticipantCount() < instance.maxPlayers())
+                .filter(QuickJoin::canJoin)
                 .sorted(Comparator.comparingInt(GameInstance::onlineParticipantCount).reversed()
                         .thenComparingInt(GameInstance::lobbyId))
                 .findFirst().orElse(null);
     }
+
+    /** Rechecked after asynchronous world preparation, before teleporting the player. */
+    public static boolean canJoin(GameInstance instance) {
+        ChallengeState state = instance.state();
+        // Standard IDLE slots are dormant waiting lobbies, prepared lazily on entry.
+        boolean waiting = state == ChallengeState.WAITING || state == ChallengeState.COUNTDOWN
+                || state == ChallengeState.IDLE && instance.gameType() != GameType.CUSTOM;
+        return waiting && instance.onlineParticipantCount() < instance.maxPlayers();
+    }
+
 }

@@ -5,7 +5,9 @@
       "label": "Minecraft: Build + Server neu starten",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/dev-server.sh",
-      "args": ["restart"],
+      "args": [
+        "restart"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -13,7 +15,9 @@
         "kind": "build",
         "isDefault": true
       },
-      "problemMatcher": ["$javac"],
+      "problemMatcher": [
+        "$javac"
+      ],
       "presentation": {
         "reveal": "always",
         "panel": "dedicated",
@@ -24,17 +28,23 @@
       "label": "Minecraft: Nur bauen + Plugin installieren",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/dev-server.sh",
-      "args": ["build"],
+      "args": [
+        "build"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": ["$javac"]
+      "problemMatcher": [
+        "$javac"
+      ]
     },
     {
       "label": "Minecraft: Server starten",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/dev-server.sh",
-      "args": ["start"],
+      "args": [
+        "start"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -44,21 +54,92 @@
       "label": "Minecraft: Server stoppen",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/dev-server.sh",
-      "args": ["stop"],
+      "args": [
+        "stop"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
       "problemMatcher": []
     },
     {
-      "label": "Minecraft: Server-Log anzeigen",
+      "label": "Minecraft: Server-Konsole öffnen",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/dev-server.sh",
-      "args": ["logs"],
+      "args": [
+        "console"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },
       "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
+    },
+    {
+      "label": "Minecraft: Server-Log anzeigen",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/dev-server.sh",
+      "args": [
+        "logs"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Minecraft: Live-Plugin aktualisieren",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/deploy-live.sh",
+      "args": [
+        "plugin"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Minecraft: Lokalen Server komplett live übernehmen",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/deploy-live.sh",
+      "args": [
+        "replace"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Minecraft: Komplett-Upload Vorschau",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/deploy-live.sh",
+      "args": [
+        "replace",
+        "--dry-run"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",

@@ -1,0 +1,375 @@
+# Wertliste der SMP-Wirtschaft. Wird beim ersten Start nach plugins/MinecraftChallenges/smp-values.yml
+# kopiert und dort gelesen; Änderungen greifen nach einem Neustart.
+#
+# value   Referenzwert in Coins pro Stück. Kaufpreise liegen bei 85–125 % davon (Händler 70–85 %).
+# depth   Markttiefe: macht das Item bei /sell verkaufbar. Nach so vielen verkauften Stück hat sich der
+#         Verkaufspreis halbiert. Kleine Tiefe = Kurs reagiert schnell (seltene oder farmbare Items).
+# as      Zählt beim Verkauf als anderes Item (z. B. Eisenblock = 9 Eisenbarren); units = wie viele.
+# shop    Pool für den Daily Shop: build (unbegrenzt, stackweise), useful, valuable, rare (je 1× pro Spieler
+#         und Tag) oder trader (nur bei Wanderhändlern).
+# bundle  Stückzahl pro Kauf (Standard: build 64, sonst 1).
+# weight  Wie oft das Angebot gezogen wird (Standard 10).
+# item / enchant / level   Für verzauberte Bücher: der Schlüssel ist dann ein freier Name.
+
+market:
+  # Anteil des Werts, den /sell bei unberührtem Markt zahlt. Technisch auf 0.175 begrenzt, damit der
+  # Verkaufspreis immer unter der Hälfte des günstigsten Kaufpreises bleibt.
+  sell-ratio: 0.1667
+  # Nach so vielen Stunden hat sich ein Kurseinbruch zur Hälfte erholt.
+  recovery-half-life-hours: 24
+  # "Heute gesucht": so viele Items bringen heute den Bonus …
+  wanted-count: 3
+  # … mit diesem Faktor (maximal 0.35 / sell-ratio) …
+  wanted-bonus: 2.0
+  # … für diesen Anteil der Markttiefe pro Spieler und Tag.
+  wanted-share: 0.25
+
+items:
+  # ------------------------------------------------------------------ Erze und Mineralien
+  COAL: { value: 4, depth: 512, shop: useful, bundle: 32 }
+  COAL_BLOCK: { value: 36, as: COAL, units: 9 }
+  IRON_INGOT: { value: 30, depth: 128, shop: useful, bundle: 8 }
+  RAW_IRON: { value: 30, as: IRON_INGOT, units: 1 }
+  IRON_NUGGET: { value: 3.4, as: IRON_INGOT, units: 0.111 }
+  IRON_BLOCK: { value: 270, as: IRON_INGOT, units: 9 }
+  RAW_IRON_BLOCK: { value: 270, as: IRON_INGOT, units: 9 }
+  COPPER_INGOT: { value: 6, depth: 512, shop: useful, bundle: 32 }
+  RAW_COPPER: { value: 6, as: COPPER_INGOT, units: 1 }
+  COPPER_BLOCK: { value: 54, as: COPPER_INGOT, units: 9 }
+  RAW_COPPER_BLOCK: { value: 54, as: COPPER_INGOT, units: 9 }
+  GOLD_INGOT: { value: 40, depth: 128, shop: valuable, bundle: 8 }
+  RAW_GOLD: { value: 40, as: GOLD_INGOT, units: 1 }
+  GOLD_NUGGET: { value: 4.5, as: GOLD_INGOT, units: 0.111 }
+  GOLD_BLOCK: { value: 360, as: GOLD_INGOT, units: 9 }
+  RAW_GOLD_BLOCK: { value: 360, as: GOLD_INGOT, units: 9 }
+  REDSTONE: { value: 3, depth: 1024, shop: useful, bundle: 32 }
+  REDSTONE_BLOCK: { value: 27, as: REDSTONE, units: 9 }
+  LAPIS_LAZULI: { value: 5, depth: 512, shop: useful, bundle: 16 }
+  LAPIS_BLOCK: { value: 45, as: LAPIS_LAZULI, units: 9 }
+  DIAMOND: { value: 200, depth: 32, shop: valuable }
+  DIAMOND_BLOCK: { value: 1800, as: DIAMOND, units: 9 }
+  EMERALD: { value: 60, depth: 64, shop: valuable, bundle: 4 }
+  EMERALD_BLOCK: { value: 540, as: EMERALD, units: 9 }
+  QUARTZ: { value: 5, depth: 512, shop: useful, bundle: 32 }
+  AMETHYST_SHARD: { value: 6, depth: 256 }
+  NETHERITE_SCRAP: { value: 400, depth: 8 }
+  ANCIENT_DEBRIS: { value: 400, as: NETHERITE_SCRAP, units: 1 }
+  NETHERITE_INGOT: { value: 1800, as: NETHERITE_SCRAP, units: 4 }
+  FLINT: { value: 1, depth: 512 }
+  CLAY_BALL: { value: 1, depth: 1024 }
+
+  # ------------------------------------------------------------------ Stein und Erde
+  COBBLESTONE: { value: 0.3, depth: 4096, shop: build }
+  STONE: { value: 0.5, depth: 4096, shop: build }
+  COBBLED_DEEPSLATE: { value: 0.4, depth: 4096, shop: build }
+  DEEPSLATE: { value: 0.5, depth: 4096 }
+  ANDESITE: { value: 0.3, depth: 4096 }
+  DIORITE: { value: 0.3, depth: 4096 }
+  GRANITE: { value: 0.3, depth: 4096 }
+  TUFF: { value: 0.3, depth: 4096 }
+  CALCITE: { value: 1, depth: 1024, shop: build }
+  DIRT: { value: 0.2, depth: 4096 }
+  SAND: { value: 0.5, depth: 4096, shop: build }
+  RED_SAND: { value: 0.8, depth: 2048, shop: build }
+  GRAVEL: { value: 0.4, depth: 4096, shop: build }
+  NETHERRACK: { value: 0.1, depth: 8192 }
+  SOUL_SAND: { value: 1, depth: 1024 }
+  BASALT: { value: 0.4, depth: 4096 }
+  BLACKSTONE: { value: 0.5, depth: 4096, shop: build }
+  END_STONE: { value: 1, depth: 2048, shop: build }
+  OBSIDIAN: { value: 12, depth: 256, shop: build, bundle: 16 }
+
+  # ------------------------------------------------------------------ Holz
+  OAK_LOG: { value: 1.25, depth: 2048, shop: build }
+  SPRUCE_LOG: { value: 1.25, depth: 2048, shop: build }
+  BIRCH_LOG: { value: 1.25, depth: 2048, shop: build }
+  JUNGLE_LOG: { value: 1.25, depth: 2048, shop: build }
+  ACACIA_LOG: { value: 1.25, depth: 2048, shop: build }
+  DARK_OAK_LOG: { value: 1.25, depth: 2048, shop: build }
+  MANGROVE_LOG: { value: 1.5, depth: 2048, shop: build }
+  CHERRY_LOG: { value: 1.5, depth: 2048, shop: build }
+  PALE_OAK_LOG: { value: 1.5, depth: 2048, shop: build }
+  CRIMSON_STEM: { value: 1.5, depth: 2048, shop: build }
+  WARPED_STEM: { value: 1.5, depth: 2048, shop: build }
+  BAMBOO: { value: 0.1, depth: 8192 }
+
+  # ------------------------------------------------------------------ Ernte und Nahrung
+  WHEAT: { value: 1, depth: 2048 }
+  CARROT: { value: 0.8, depth: 2048 }
+  POTATO: { value: 0.8, depth: 2048 }
+  BEETROOT: { value: 1, depth: 2048 }
+  MELON_SLICE: { value: 0.3, depth: 4096 }
+  PUMPKIN: { value: 1.5, depth: 2048 }
+  SUGAR_CANE: { value: 0.8, depth: 2048 }
+  CACTUS: { value: 0.5, depth: 2048 }
+  KELP: { value: 0.2, depth: 4096 }
+  COCOA_BEANS: { value: 1.5, depth: 1024 }
+  NETHER_WART: { value: 2, depth: 1024, shop: valuable, bundle: 16 }
+  SWEET_BERRIES: { value: 0.5, depth: 2048 }
+  APPLE: { value: 4, depth: 256 }
+  BROWN_MUSHROOM: { value: 1.5, depth: 1024 }
+  RED_MUSHROOM: { value: 1.5, depth: 1024 }
+  EGG: { value: 1, depth: 1024 }
+  HONEYCOMB: { value: 6, depth: 256 }
+  HONEY_BOTTLE: { value: 8, depth: 256 }
+  BEEF: { value: 2.5, depth: 1024 }
+  PORKCHOP: { value: 2.5, depth: 1024 }
+  CHICKEN: { value: 2, depth: 1024 }
+  MUTTON: { value: 2, depth: 1024 }
+  RABBIT: { value: 3, depth: 512 }
+  COD: { value: 3, depth: 1024 }
+  SALMON: { value: 3, depth: 1024 }
+  TROPICAL_FISH: { value: 8, depth: 256 }
+  PUFFERFISH: { value: 8, depth: 256 }
+
+  # ------------------------------------------------------------------ Mob-Drops
+  ROTTEN_FLESH: { value: 0.3, depth: 4096 }
+  BONE: { value: 1.5, depth: 2048 }
+  STRING: { value: 1.5, depth: 2048, shop: useful, bundle: 16 }
+  SPIDER_EYE: { value: 2, depth: 1024 }
+  GUNPOWDER: { value: 5, depth: 512, shop: useful, bundle: 16 }
+  ENDER_PEARL: { value: 20, depth: 256, shop: useful, bundle: 4 }
+  BLAZE_ROD: { value: 20, depth: 128, shop: valuable, bundle: 4 }
+  SLIME_BALL: { value: 6, depth: 256, shop: useful, bundle: 8 }
+  LEATHER: { value: 5, depth: 512, shop: useful, bundle: 8 }
+  FEATHER: { value: 1, depth: 2048 }
+  WHITE_WOOL: { value: 1.5, depth: 2048, shop: build }
+  INK_SAC: { value: 2, depth: 1024 }
+  GLOW_INK_SAC: { value: 5, depth: 512 }
+  PHANTOM_MEMBRANE: { value: 15, depth: 128 }
+  GHAST_TEAR: { value: 60, depth: 32 }
+  MAGMA_CREAM: { value: 8, depth: 256 }
+  PRISMARINE_SHARD: { value: 3, depth: 1024 }
+  PRISMARINE_CRYSTALS: { value: 5, depth: 512 }
+  RABBIT_HIDE: { value: 2, depth: 512 }
+  RABBIT_FOOT: { value: 20, depth: 64 }
+  TURTLE_SCUTE: { value: 30, depth: 64 }
+  NAUTILUS_SHELL: { value: 60, depth: 32, shop: rare, bundle: 2 }
+  BREEZE_ROD: { value: 30, depth: 64 }
+  ECHO_SHARD: { value: 150, depth: 16, shop: rare }
+  SHULKER_SHELL: { value: 250, depth: 16, shop: rare }
+  WITHER_SKELETON_SKULL: { value: 500, depth: 8, shop: rare, weight: 4 }
+  DRAGON_BREATH: { value: 30, depth: 64, shop: rare, bundle: 4 }
+  TOTEM_OF_UNDYING: { value: 400, depth: 8 }
+  NETHER_STAR: { value: 3000, depth: 4 }
+
+  # ------------------------------------------------------------------ Daily Shop: Baublöcke (unbegrenzt)
+  STONE_BRICKS: { value: 0.8, shop: build }
+  SMOOTH_STONE: { value: 0.7, shop: build }
+  POLISHED_ANDESITE: { value: 0.5, shop: build }
+  POLISHED_DIORITE: { value: 0.5, shop: build }
+  POLISHED_GRANITE: { value: 0.5, shop: build }
+  DEEPSLATE_BRICKS: { value: 0.8, shop: build }
+  DEEPSLATE_TILES: { value: 0.8, shop: build }
+  POLISHED_DEEPSLATE: { value: 0.7, shop: build }
+  TUFF_BRICKS: { value: 0.8, shop: build }
+  BRICKS: { value: 2, shop: build }
+  MUD_BRICKS: { value: 1.2, shop: build }
+  PACKED_MUD: { value: 1, shop: build }
+  SANDSTONE: { value: 1, shop: build }
+  SMOOTH_SANDSTONE: { value: 1.2, shop: build }
+  RED_SANDSTONE: { value: 1.2, shop: build }
+  QUARTZ_BLOCK: { value: 8, shop: build }
+  SMOOTH_QUARTZ: { value: 8, shop: build }
+  QUARTZ_BRICKS: { value: 8, shop: build }
+  PRISMARINE: { value: 3, shop: build }
+  PRISMARINE_BRICKS: { value: 5, shop: build }
+  DARK_PRISMARINE: { value: 5, shop: build }
+  SEA_LANTERN: { value: 12, shop: build, bundle: 16 }
+  GLASS: { value: 1.25, shop: build }
+  TINTED_GLASS: { value: 8, shop: build, bundle: 16 }
+  WHITE_STAINED_GLASS: { value: 1.5, shop: build }
+  LIGHT_BLUE_STAINED_GLASS: { value: 1.5, shop: build }
+  BLACK_STAINED_GLASS: { value: 1.5, shop: build }
+  WHITE_CONCRETE: { value: 1.5, shop: build }
+  LIGHT_GRAY_CONCRETE: { value: 1.5, shop: build }
+  GRAY_CONCRETE: { value: 1.5, shop: build }
+  BLACK_CONCRETE: { value: 1.5, shop: build }
+  RED_CONCRETE: { value: 1.5, shop: build }
+  ORANGE_CONCRETE: { value: 1.5, shop: build }
+  YELLOW_CONCRETE: { value: 1.5, shop: build }
+  LIME_CONCRETE: { value: 1.5, shop: build }
+  GREEN_CONCRETE: { value: 1.5, shop: build }
+  CYAN_CONCRETE: { value: 1.5, shop: build }
+  LIGHT_BLUE_CONCRETE: { value: 1.5, shop: build }
+  BLUE_CONCRETE: { value: 1.5, shop: build }
+  PURPLE_CONCRETE: { value: 1.5, shop: build }
+  MAGENTA_CONCRETE: { value: 1.5, shop: build }
+  PINK_CONCRETE: { value: 1.5, shop: build }
+  BROWN_CONCRETE: { value: 1.5, shop: build }
+  TERRACOTTA: { value: 1.2, shop: build }
+  WHITE_TERRACOTTA: { value: 1.5, shop: build }
+  ORANGE_TERRACOTTA: { value: 1.5, shop: build }
+  RED_TERRACOTTA: { value: 1.5, shop: build }
+  BROWN_TERRACOTTA: { value: 1.5, shop: build }
+  CYAN_TERRACOTTA: { value: 1.5, shop: build }
+  LIGHT_GRAY_TERRACOTTA: { value: 1.5, shop: build }
+  OAK_PLANKS: { value: 0.4, shop: build }
+  SPRUCE_PLANKS: { value: 0.4, shop: build }
+  BIRCH_PLANKS: { value: 0.4, shop: build }
+  DARK_OAK_PLANKS: { value: 0.4, shop: build }
+  CHERRY_PLANKS: { value: 0.5, shop: build }
+  MANGROVE_PLANKS: { value: 0.5, shop: build }
+  BAMBOO_PLANKS: { value: 0.4, shop: build }
+  NETHER_BRICKS: { value: 1.5, shop: build }
+  RED_NETHER_BRICKS: { value: 2.5, shop: build }
+  POLISHED_BLACKSTONE_BRICKS: { value: 1, shop: build }
+  SMOOTH_BASALT: { value: 0.6, shop: build }
+  END_STONE_BRICKS: { value: 1.5, shop: build }
+  PURPUR_BLOCK: { value: 3, shop: build }
+  AMETHYST_BLOCK: { value: 20, shop: build, bundle: 16 }
+  MOSS_BLOCK: { value: 2, shop: build }
+  GRASS_BLOCK: { value: 1, shop: build }
+  PODZOL: { value: 1.5, shop: build }
+  MYCELIUM: { value: 3, shop: build, bundle: 32 }
+  PACKED_ICE: { value: 3, shop: build }
+  BLUE_ICE: { value: 25, shop: build, bundle: 16 }
+  SNOW_BLOCK: { value: 1, shop: build }
+  GLOWSTONE: { value: 8, shop: build, bundle: 16 }
+  SHROOMLIGHT: { value: 6, shop: build, bundle: 16 }
+  DRIPSTONE_BLOCK: { value: 1.5, shop: build }
+  BOOKSHELF: { value: 12, shop: build, bundle: 16 }
+  HAY_BLOCK: { value: 10, shop: build, bundle: 16 }
+  RESIN_BRICKS: { value: 3, shop: build }
+  LANTERN: { value: 4, shop: build, bundle: 16 }
+
+  # ------------------------------------------------------------------ Daily Shop: Nützliches (1× pro Tag)
+  BREAD: { value: 2.5, shop: useful, bundle: 16 }
+  COOKED_BEEF: { value: 4, shop: useful, bundle: 16 }
+  COOKED_PORKCHOP: { value: 4, shop: useful, bundle: 16 }
+  COOKED_COD: { value: 4, shop: useful, bundle: 16 }
+  PUMPKIN_PIE: { value: 4, shop: useful, bundle: 8 }
+  GOLDEN_CARROT: { value: 10, shop: useful, bundle: 8 }
+  IRON_PICKAXE: { value: 100, shop: useful }
+  IRON_AXE: { value: 100, shop: useful }
+  IRON_SHOVEL: { value: 40, shop: useful }
+  IRON_SWORD: { value: 65, shop: useful }
+  IRON_HELMET: { value: 150, shop: useful }
+  IRON_CHESTPLATE: { value: 240, shop: useful }
+  IRON_LEGGINGS: { value: 210, shop: useful }
+  IRON_BOOTS: { value: 120, shop: useful }
+  SHEARS: { value: 65, shop: useful }
+  FISHING_ROD: { value: 15, shop: useful }
+  FLINT_AND_STEEL: { value: 35, shop: useful }
+  BUCKET: { value: 95, shop: useful }
+  WATER_BUCKET: { value: 100, shop: useful }
+  BOW: { value: 20, shop: useful }
+  CROSSBOW: { value: 60, shop: useful }
+  ARROW: { value: 1.25, shop: useful, bundle: 32 }
+  SHIELD: { value: 40, shop: useful }
+  TORCH: { value: 0.6, shop: useful, bundle: 32 }
+  LADDER: { value: 1, shop: useful, bundle: 16 }
+  SCAFFOLDING: { value: 0.5, shop: useful, bundle: 32 }
+  CHEST: { value: 3, shop: useful, bundle: 4 }
+  WHITE_BED: { value: 12, shop: useful }
+  BONE_MEAL: { value: 2, shop: useful, bundle: 16 }
+  EXPERIENCE_BOTTLE: { value: 15, shop: useful, bundle: 8 }
+  OAK_BOAT: { value: 2, shop: useful }
+  LEAD: { value: 20, shop: useful, bundle: 2 }
+  COMPASS: { value: 125, shop: useful }
+  CLOCK: { value: 165, shop: useful }
+  MAP: { value: 10, shop: useful }
+  SPYGLASS: { value: 30, shop: useful }
+  FIREWORK_ROCKET: { value: 5, shop: useful, bundle: 16 }
+  RAIL: { value: 11, shop: useful, bundle: 16 }
+  POWERED_RAIL: { value: 42, shop: useful, bundle: 8 }
+  MINECART: { value: 150, shop: useful }
+  HOPPER: { value: 160, shop: useful }
+  PISTON: { value: 40, shop: useful, bundle: 2 }
+  TNT: { value: 30, shop: useful, bundle: 4 }
+  BREWING_STAND: { value: 25, shop: useful }
+  CAMPFIRE: { value: 5, shop: useful }
+  GLASS_BOTTLE: { value: 1.5, shop: useful, bundle: 8 }
+  BOOK: { value: 8, shop: useful, bundle: 8 }
+  PAPER: { value: 0.8, shop: useful, bundle: 16 }
+  BUNDLE: { value: 30, shop: useful }
+
+  # ------------------------------------------------------------------ Daily Shop: Wertvolles (1× pro Tag)
+  GOLDEN_APPLE: { value: 330, shop: valuable }
+  NAME_TAG: { value: 120, shop: valuable }
+  SADDLE: { value: 150, shop: valuable }
+  DIAMOND_PICKAXE: { value: 620, shop: valuable }
+  DIAMOND_AXE: { value: 620, shop: valuable }
+  DIAMOND_SHOVEL: { value: 220, shop: valuable }
+  DIAMOND_SWORD: { value: 420, shop: valuable }
+  DIAMOND_HELMET: { value: 1000, shop: valuable, weight: 5 }
+  DIAMOND_CHESTPLATE: { value: 1600, shop: valuable, weight: 5 }
+  DIAMOND_LEGGINGS: { value: 1400, shop: valuable, weight: 5 }
+  DIAMOND_BOOTS: { value: 800, shop: valuable, weight: 5 }
+  ENCHANTING_TABLE: { value: 500, shop: valuable }
+  ANVIL: { value: 950, shop: valuable }
+  ENDER_CHEST: { value: 150, shop: valuable }
+  SLIME_BLOCK: { value: 54, shop: valuable, bundle: 4 }
+  HONEY_BLOCK: { value: 32, shop: valuable, bundle: 4 }
+  SCULK_SENSOR: { value: 60, shop: valuable, bundle: 2 }
+  JUKEBOX: { value: 210, shop: valuable }
+  BELL: { value: 150, shop: valuable }
+  IRON_HORSE_ARMOR: { value: 150, shop: valuable }
+  GOLDEN_HORSE_ARMOR: { value: 250, shop: valuable }
+  WOLF_ARMOR: { value: 100, shop: valuable }
+  ENDER_EYE: { value: 45, shop: valuable, bundle: 2 }
+
+  # ------------------------------------------------------------------ Daily Shop: Rarität des Tages
+  BOOK_UNBREAKING: { item: ENCHANTED_BOOK, enchant: unbreaking, level: 3, value: 300, shop: rare }
+  BOOK_EFFICIENCY: { item: ENCHANTED_BOOK, enchant: efficiency, level: 4, value: 350, shop: rare }
+  BOOK_FORTUNE: { item: ENCHANTED_BOOK, enchant: fortune, level: 3, value: 700, shop: rare }
+  BOOK_SILK_TOUCH: { item: ENCHANTED_BOOK, enchant: silk_touch, level: 1, value: 400, shop: rare }
+  BOOK_LOOTING: { item: ENCHANTED_BOOK, enchant: looting, level: 3, value: 450, shop: rare }
+  BOOK_PROTECTION: { item: ENCHANTED_BOOK, enchant: protection, level: 4, value: 450, shop: rare }
+  BOOK_SHARPNESS: { item: ENCHANTED_BOOK, enchant: sharpness, level: 4, value: 350, shop: rare }
+  BOOK_FEATHER_FALLING: { item: ENCHANTED_BOOK, enchant: feather_falling, level: 4, value: 250, shop: rare }
+  BOOK_POWER: { item: ENCHANTED_BOOK, enchant: power, level: 4, value: 300, shop: rare }
+  BOOK_INFINITY: { item: ENCHANTED_BOOK, enchant: infinity, level: 1, value: 350, shop: rare }
+  BOOK_RESPIRATION: { item: ENCHANTED_BOOK, enchant: respiration, level: 3, value: 250, shop: rare }
+  BOOK_DEPTH_STRIDER: { item: ENCHANTED_BOOK, enchant: depth_strider, level: 3, value: 250, shop: rare }
+  CONDUIT: { value: 1500, shop: rare, weight: 3 }
+  DRAGON_HEAD: { value: 800, shop: rare, weight: 3 }
+
+  # ------------------------------------------------------------------ nur bei Wanderhändlern
+  BOOK_MENDING: { item: ENCHANTED_BOOK, enchant: mending, level: 1, value: 600, shop: trader }
+  BOOK_SWIFT_SNEAK: { item: ENCHANTED_BOOK, enchant: swift_sneak, level: 3, value: 600, shop: trader }
+  BOOK_SOUL_SPEED: { item: ENCHANTED_BOOK, enchant: soul_speed, level: 3, value: 300, shop: trader }
+  BOOK_FROST_WALKER: { item: ENCHANTED_BOOK, enchant: frost_walker, level: 2, value: 250, shop: trader }
+  ENCHANTED_GOLDEN_APPLE: { value: 2500, shop: trader, weight: 3 }
+  TRIDENT: { value: 1200, shop: trader, weight: 5 }
+  HEART_OF_THE_SEA: { value: 800, shop: trader, weight: 5 }
+  SPONGE: { value: 80, shop: trader, bundle: 4 }
+  SNIFFER_EGG: { value: 300, shop: trader, weight: 5 }
+  RECOVERY_COMPASS: { value: 600, shop: trader, weight: 5 }
+  DIAMOND_HORSE_ARMOR: { value: 800, shop: trader, weight: 5 }
+  TURTLE_HELMET: { value: 200, shop: trader }
+  GOAT_HORN: { value: 80, shop: trader }
+  AXOLOTL_BUCKET: { value: 80, shop: trader }
+  TRIAL_KEY: { value: 80, shop: trader, bundle: 2 }
+  OMINOUS_TRIAL_KEY: { value: 300, shop: trader, weight: 5 }
+  WIND_CHARGE: { value: 4, shop: trader, bundle: 16 }
+  CREEPER_HEAD: { value: 400, shop: trader, weight: 4 }
+  ZOMBIE_HEAD: { value: 300, shop: trader, weight: 4 }
+  SKELETON_SKULL: { value: 300, shop: trader, weight: 4 }
+  PIGLIN_HEAD: { value: 300, shop: trader, weight: 4 }
+  NETHERITE_UPGRADE_SMITHING_TEMPLATE: { value: 900, shop: trader, weight: 3 }
+  SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE: { value: 250, shop: trader, weight: 4 }
+  COAST_ARMOR_TRIM_SMITHING_TEMPLATE: { value: 250, shop: trader, weight: 4 }
+  WILD_ARMOR_TRIM_SMITHING_TEMPLATE: { value: 250, shop: trader, weight: 4 }
+  DUNE_ARMOR_TRIM_SMITHING_TEMPLATE: { value: 250, shop: trader, weight: 4 }
+  EYE_ARMOR_TRIM_SMITHING_TEMPLATE: { value: 400, shop: trader, weight: 3 }
+  WARD_ARMOR_TRIM_SMITHING_TEMPLATE: { value: 500, shop: trader, weight: 3 }
+  SILENCE_ARMOR_TRIM_SMITHING_TEMPLATE: { value: 800, shop: trader, weight: 2 }
+  GLOBE_BANNER_PATTERN: { value: 100, shop: trader }
+  CREEPER_BANNER_PATTERN: { value: 150, shop: trader }
+  SKULL_BANNER_PATTERN: { value: 200, shop: trader }
+  PIGLIN_BANNER_PATTERN: { value: 150, shop: trader }
+  MUSIC_DISC_13: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_CAT: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_BLOCKS: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_CHIRP: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_FAR: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_MALL: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_MELLOHI: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_STAL: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_STRAD: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_WARD: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_WAIT: { value: 150, shop: trader, weight: 4 }
+  MUSIC_DISC_PIGSTEP: { value: 400, shop: trader, weight: 3 }
+  MUSIC_DISC_OTHERSIDE: { value: 400, shop: trader, weight: 3 }
+  MUSIC_DISC_RELIC: { value: 400, shop: trader, weight: 3 }

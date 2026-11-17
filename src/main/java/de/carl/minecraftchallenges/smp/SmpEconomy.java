@@ -126,6 +126,15 @@ public final class SmpEconomy {
         return true;
     }
 
+    /** Pays money in, e.g. the proceeds of a sale or a refund. */
+    public void deposit(UUID uuid, long amount, String reason) {
+        if (amount <= 0 || !balances.containsKey(uuid)) return;
+        long current = balances.get(uuid);
+        balances.put(uuid, current > Long.MAX_VALUE - amount ? Long.MAX_VALUE : current + amount);
+        save();
+        logger.info("[SMP] " + name(uuid) + " erhält " + format(amount) + " (" + reason + ").");
+    }
+
     /** Admin adjustment; the balance never drops below zero. */
     public long set(UUID uuid, long amount) {
         long value = Math.max(0, amount);
