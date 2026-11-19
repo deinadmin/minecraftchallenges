@@ -14,6 +14,9 @@ import org.bukkit.Particle;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.block.PistonMoveReaction;
+import org.bukkit.block.data.Directional;
 import org.bukkit.block.data.Ageable;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.InvalidConfigurationException;
@@ -25,6 +28,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPistonExtendEvent;
+import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.PlayerFishEvent;
@@ -518,6 +523,36 @@ public final class QuestService implements Listener {
     public void onPlace(BlockPlaceEvent event) {
         Block block = event.getBlock();
         if (smp.isSmpWorld(block.getWorld()) && trackedBlocks.contains(block.getType().name())) rememberPlaced(block);
+    }
+
+    /**
+     * A placed block stays placed when a piston moves it, whoever placed it and whoever runs the piston. Otherwise one
+     * silk-touched ore or gold block could be pushed aside and mined again and again for a mining quest.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPistonExtend(BlockPistonExtendEvent event) {
+        movePlaced(event.getBlock(), event.getBlocks(), true);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPistonRetract(BlockPistonRetractEvent event) {
+        movePlaced(event.getBlock(), event.getBlocks(), false);
+    }
+
+    private void movePlaced(Block piston, List<Block> moved, boolean extending) {
+        if (moved.isEmpty() || !smp.isSmpWorld(piston.getWorld())) return;
+        if (!(piston.getBlockData() instanceof Directional directional)) return;
+        // Extending pushes along the piston's facing, a sticky piston pulls the other way.
+        BlockFace direction = extending ? directional.getFacing() : directional.getFacing().getOppositeFace();
+        // Forget every old spot first, so blocks moving into each other's places in a row do not clash.
+        List<Block> targets = new ArrayList<>();
+        for (Block block : moved) {
+            if (!trackedBlocks.contains(block.getType().name()) || !forgetPlaced(block)) continue;
+            // Blocks a piston breaks (melons, for example) drop as items and leave nothing to remember.
+            if (block.getPistonMoveReaction() == PistonMoveReaction.BREAK) continue;
+            targets.add(block.getRelative(direction));
+        }
+        for (Block target : targets) rememberPlaced(target);
     }
 
     // Player-placed blocks of quest materials are remembered in their chunk, so they survive restarts.

@@ -38,6 +38,7 @@ public final class ClaimService {
     private final Map<Long, List<Claim>> byChunk = new HashMap<>();
     private final List<Blocker> blockers = new ArrayList<>();
     private final java.util.Set<UUID> bordersHidden = new java.util.HashSet<>();
+    private final List<java.util.function.Consumer<Claim>> permissionListeners = new ArrayList<>();
     private boolean readOnly;
 
     public ClaimService(SmpService smp, Path file, FileConfiguration config) {
@@ -84,6 +85,13 @@ public final class ClaimService {
                         Claim claim = new Claim(UUID.fromString(key), UUID.fromString(entry.getString("owner", "")),
                                 entry.getInt("x"), entry.getInt("z"), entry.getInt("radius"), entry.getLong("invested"));
                         for (String trusted : entry.getStringList("trusted")) claim.trusted().add(UUID.fromString(trusted));
+                        ConfigurationSection flags = entry.getConfigurationSection("permissions");
+                        if (flags != null) {
+                            for (String flagKey : flags.getKeys(false)) {
+                                ClaimFlag flag = ClaimFlag.fromKey(flagKey);
+                                if (flag != null) claim.allow(flag, flags.getBoolean(flagKey));
+                            }
+                        }
                         claims.put(claim.id(), claim);
                     }
                 }
@@ -115,6 +123,12 @@ public final class ClaimService {
             yaml.set(path + ".radius", claim.radius());
             yaml.set(path + ".invested", claim.invested());
             yaml.set(path + ".trusted", claim.trusted().stream().map(UUID::toString).toList());
+            // Only what differs from the defaults, so a later change of a default reaches untouched plots.
+            for (ClaimFlag flag : ClaimFlag.values()) {
+                if (claim.allows(flag) != flag.allowedByDefault()) {
+                    yaml.set(path + ".permissions." + flag.key(), claim.allows(flag));
+                }
+            }
         }
         smp.writer().submit(file, yaml.saveToString());
     }
@@ -190,15 +204,35 @@ public final class ClaimService {
         return smp.economy().name(player);
     }
 
-    /** True if the player may build and use things at this spot. Admins in the SMP edit mode always may. */
+    /** True if the player may build at this spot: members, admins in the SMP edit mode, or anyone if the owner allows it. */
     public boolean mayBuild(Player player, Location location) {
-        Claim claim = at(location);
-        return claim == null || claim.isMember(player.getUniqueId()) || smp.isEditing(player);
+        return allows(player, location, ClaimFlag.BUILD);
     }
 
     public boolean mayBuild(Player player, Block block) {
-        Claim claim = at(block);
-        return claim == null || claim.isMember(player.getUniqueId()) || smp.isEditing(player);
+        return allows(player, block.getWorld(), block.getX(), block.getZ(), ClaimFlag.BUILD);
+    }
+
+    /**
+     * True if the player may do what the flag stands for at this spot: always outside plots, for
+     * members and for admins in the edit mode, otherwise if the owner allows it.
+     */
+    public boolean allows(Player player, Location location, ClaimFlag flag) {
+        return location == null || allows(player, location.getWorld(), location.getBlockX(), location.getBlockZ(), flag);
+    }
+
+    public boolean allows(Player player, Block block, ClaimFlag flag) {
+        return allows(player, block.getWorld(), block.getX(), block.getZ(), flag);
+    }
+
+    private boolean allows(Player player, World world, int x, int z, ClaimFlag flag) {
+        Claim claim = at(world, x, z);
+        return claim == null || claim.allows(flag) || claim.isMember(player.getUniqueId()) || smp.bypassesProtection(player);
+    }
+
+    /** Owners change their plot's permissions; claim admins may change every plot's. */
+    public boolean mayEditPermissions(Player player, Claim claim) {
+        return claim.owner().equals(player.getUniqueId()) || player.hasPermission(ClaimCommand.ADMIN_PERMISSION);
     }
 
     // ---------------------------------------------------------------- placement rules
@@ -275,9 +309,44 @@ public final class ClaimService {
         if (claims.remove(claim.id()) != null) changed();
     }
 
+    /** The new owner starts with the default permissions; the old owner's choices do not carry over. */
     public void transfer(Claim claim, UUID newOwner) {
         claim.owner(newOwner);
+        claim.resetFlags();
         changed();
+    }
+
+    public void setAllowed(Claim claim, ClaimFlag flag, boolean allow) {
+        if (claim.allows(flag) == allow) return;
+        claim.allow(flag, allow);
+        permissionsChanged(claim);
+    }
+
+    /** Sets several flags at once, e.g. a whole menu row; saves once. */
+    public void setAllowed(Claim claim, java.util.Collection<ClaimFlag> flags, boolean allow) {
+        boolean changed = false;
+        for (ClaimFlag flag : flags) {
+            if (claim.allows(flag) == allow) continue;
+            claim.allow(flag, allow);
+            changed = true;
+        }
+        if (changed) permissionsChanged(claim);
+    }
+
+    public void resetPermissions(Claim claim) {
+        if (claim.allowed().equals(ClaimFlag.defaults())) return;
+        claim.resetFlags();
+        permissionsChanged(claim);
+    }
+
+    /** Runs after a plot's permissions changed, e.g. to refresh menus others have open. */
+    public void onPermissionsChange(java.util.function.Consumer<Claim> listener) {
+        permissionListeners.add(listener);
+    }
+
+    private void permissionsChanged(Claim claim) {
+        save();
+        for (java.util.function.Consumer<Claim> listener : permissionListeners) listener.accept(claim);
     }
 
     public boolean trust(Claim claim, UUID player) {

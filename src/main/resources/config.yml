@@ -40,6 +40,16 @@ smp:
   economy:
     starting-balance: 100
     currency: Coins
+    # /buylevel: Ein XP-Punkt kostet den Wert einer Erfahrungsflasche (smp-values.yml) geteilt durch ihre
+    # durchschnittlich 7 XP, mal price-factor. Level werden nach ihren XP-Punkten bezahlt, hohe Level kosten also mehr.
+    buylevel:
+      price-factor: 1.0
+      # Jeder Kauf hebt den Preis für alle an, höchstens um max-surcharge (0.5 = +50 %) …
+      max-surcharge: 0.5
+      # … und um die Hälfte davon nach so vielen gekauften XP-Punkten (Level 0 → 30 sind 1.395 Punkte).
+      demand-depth: 4000
+      # Nach so vielen Stunden hat sich die Nachfrage halbiert.
+      demand-half-life-hours: 12
   claims:
     # So viele Grundstücke darf ein Spieler besitzen; jedes weitere kostet beim Kauf das Vielfache.
     max-per-player: 3
@@ -82,6 +92,11 @@ smp:
       roam-radius: 10
       lifetime-hours-min: 24
       lifetime-hours-max: 48
+  afk-tokens:
+    # /afktoken hält je Token genau einen Chunk geladen (Farmen laufen weiter, ohne dass jemand dort ist).
+    max-tokens: 20
+    # Längere Dauern werden auf diese Höchstdauer gekürzt.
+    max-days: 30
   backups:
     # relativ zum Serverordner
     folder: backups/smp
@@ -97,3 +112,16 @@ performance:
     max-in-flight-chunks: 4
     blocks-per-tick: 2048
     milliseconds-per-tick: 2.0
+
+render-distance:
+  # Höchstwert für /renderdistance (Minecraft erlaubt maximal 32).
+  max: 32
+  # Läuft der Server nicht mehr flüssig, werden alle Anpassungen automatisch zurückgesetzt.
+  watchdog:
+    # Durchschnittliche Tick-Dauer in Millisekunden; 50 ms entsprechen genau 20 TPS.
+    max-mspt: 45.0
+    # So viele Prüfungen hintereinander müssen zu langsam sein.
+    strikes: 3
+    interval-seconds: 5
+    # Nach einer Änderung wird so lange nicht geprüft, damit das Nachladen der Chunks nicht sofort auslöst.
+    grace-seconds: 20

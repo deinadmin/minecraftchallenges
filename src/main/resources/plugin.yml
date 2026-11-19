@@ -19,6 +19,10 @@ commands:
     description: Hält die laufende Challenge offen, auch wenn alle Spieler gehen (nur Admins)
     usage: /keepalive
     permission: minecraftchallenges.command.keepalive
+  renderdistance:
+    description: Ändert die Render-Distanz in Challenges und im SMP (Mods für sich, Admins auch für die Welt)
+    usage: /renderdistance <2-32|reset> [@p|@a|Spieler]
+    aliases: [rd]
   togglechallengehud:
     description: Blendet das Challenge-HUD für dich ein oder aus
     usage: /togglechallengehud
@@ -73,9 +77,12 @@ commands:
     description: Zeigt die Marktpreise und heute gesuchte Items
     usage: /prices
     aliases: [price]
+  buylevel:
+    description: Kauft Erfahrungslevel für Coins, mit Preisanzeige und Bestätigung
+    usage: /buylevel <1-100>
   claim:
     description: Kauft und verwaltet Grundstücke im SMP
-    usage: /claim <buy|upgrade|info|list|trust|untrust|transfer|sell|accept|deny|abandon|border>
+    usage: /claim <buy|upgrade|info|list|trust|untrust|permissions|transfer|sell|accept|deny|abandon|border>
   quest:
     description: Zeigt deine laufende SMP-Quest oder bricht sie ab
     usage: /quest [cancel]
@@ -94,6 +101,26 @@ commands:
     description: Öffnet deine SMP-Endertruhe (Admins auch die anderer Spieler)
     usage: /ec [Spieler]
     aliases: [enderchest]
+  invsee:
+    description: Zeigt das SMP-Inventar eines Spielers und lässt es bearbeiten (nur Admins)
+    usage: /invsee <Spieler>
+    permission: minecraftchallenges.command.invsee
+  craftingtable:
+    description: Öffnet im SMP überall eine Werkbank
+    usage: /craftingtable
+    aliases: [ct]
+  pos:
+    description: Zeigt die Position eines Spielers, mit Knöpfen zum unsichtbaren Zuschauen und Teleportieren
+    usage: /pos <Spieler> [spectate|teleport]
+    permission: minecraftchallenges.command.pos
+  spectate:
+    description: Macht dich an deiner Position unsichtbar (Kreativ, Figur bleibt AFK stehen); nochmal zum Zurückkehren
+    usage: /spectate
+    permission: minecraftchallenges.command.spectate
+  afktoken:
+    description: Hält den Chunk an deiner Position für eine Zeit geladen, damit Farmen weiterlaufen (nur Admins)
+    usage: /afktoken <Dauer>|list|delete <ID>
+    permission: minecraftchallenges.command.afktoken
   backup:
     description: Verwaltet SMP-Backups
     usage: /backup <create [Name]|list|restore <Name>|delete <Name>>
@@ -109,6 +136,8 @@ permissions:
       minecraftchallenges.command.setlobby: true
       minecraftchallenges.command.reload: true
       minecraftchallenges.command.keepalive: true
+      minecraftchallenges.command.renderdistance: true
+      minecraftchallenges.command.renderdistance-others: true
       minecraftchallenges.command.backup: true
       minecraftchallenges.command.eco: true
       minecraftchallenges.command.shop: true
@@ -116,6 +145,10 @@ permissions:
       minecraftchallenges.command.smpnpc: true
       minecraftchallenges.command.smp-setspawn: true
       minecraftchallenges.command.ec-others: true
+      minecraftchallenges.command.invsee: true
+      minecraftchallenges.command.pos: true
+      minecraftchallenges.command.spectate: true
+      minecraftchallenges.command.afktoken: true
       minecraftchallenges.command.challenge-menu: true
       minecraftchallenges.command.lobby: true
       minecraftchallenges.challenge.ready: true
@@ -124,8 +157,15 @@ permissions:
     default: false
     children:
       minecraftchallenges.challenge.manage: true
+      minecraftchallenges.command.renderdistance: true
       minecraftchallenges.command.challenge-menu: true
       minecraftchallenges.command.lobby: true
+  minecraftchallenges.command.renderdistance:
+    description: Darf die eigene Render-Distanz in Challenges und im SMP ändern (Mods, Admins)
+    default: false
+  minecraftchallenges.command.renderdistance-others:
+    description: Darf die Render-Distanz anderer Spieler und der ganzen Welt ändern (@a)
+    default: false
   minecraftchallenges.challenge.manage:
     description: Darf Challenge-Menü, Zeit, Regeneration und Force-Start verwalten
     default: false
@@ -164,6 +204,18 @@ permissions:
     default: false
   minecraftchallenges.command.ec-others:
     description: Darf die SMP-Endertruhen anderer Spieler öffnen und bearbeiten
+    default: false
+  minecraftchallenges.command.invsee:
+    description: Darf die SMP-Inventare anderer Spieler öffnen und bearbeiten
+    default: false
+  minecraftchallenges.command.pos:
+    description: Darf Spielerpositionen sehen, unsichtbar zuschauen und sich zu Spielern teleportieren
+    default: false
+  minecraftchallenges.command.spectate:
+    description: Darf sich mit /spectate an der eigenen Position unsichtbar machen
+    default: false
+  minecraftchallenges.command.afktoken:
+    description: Darf AFK-Tokens setzen, auflisten und löschen, die SMP-Chunks geladen halten
     default: false
   minecraftchallenges.command.challenge-menu:
     description: Darf das Navigations- und Challenge-Menü öffnen

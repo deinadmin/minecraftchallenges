@@ -31,7 +31,7 @@ public final class ClaimCommand implements CommandExecutor, TabCompleter {
     private static final long CONFIRM_MILLIS = 60_000;
     private static final long OFFER_MILLIS = 120_000;
     private static final List<String> SUBCOMMANDS = List.of("buy", "upgrade", "info", "list", "trust", "untrust",
-            "transfer", "sell", "accept", "deny", "abandon", "border", "confirm", "cancel");
+            "permissions", "transfer", "sell", "accept", "deny", "abandon", "border", "confirm", "cancel");
 
     private enum Action { BUY, UPGRADE, ABANDON, DELETE }
 
@@ -44,13 +44,15 @@ public final class ClaimCommand implements CommandExecutor, TabCompleter {
     private final SmpService smp;
     private final ClaimService claims;
     private final ClaimBorders borders;
+    private final ClaimPermissionsMenu permissionsMenu;
     private final Map<UUID, Pending> pending = new HashMap<>();
     private final Map<UUID, Offer> offers = new HashMap<>();
 
-    public ClaimCommand(SmpService smp, ClaimService claims, ClaimBorders borders) {
+    public ClaimCommand(SmpService smp, ClaimService claims, ClaimBorders borders, ClaimPermissionsMenu permissionsMenu) {
         this.smp = smp;
         this.claims = claims;
         this.borders = borders;
+        this.permissionsMenu = permissionsMenu;
     }
 
     @Override
@@ -72,6 +74,7 @@ public final class ClaimCommand implements CommandExecutor, TabCompleter {
             case "list" -> list(player);
             case "trust" -> trust(player, args, true);
             case "untrust" -> trust(player, args, false);
+            case "permissions" -> permissions(player);
             case "transfer" -> offer(player, args, false);
             case "sell" -> offer(player, args, true);
             case "accept" -> accept(player);
@@ -191,7 +194,7 @@ public final class ClaimCommand implements CommandExecutor, TabCompleter {
                 Claim claim = claims.create(uuid, action.x, action.z, price);
                 borders.showOutline(player, claim);
                 success(player, "Das Grundstück gehört dir! Freunde lässt du mit /claim trust <Spieler> mitbauen, "
-                        + "größer wird es mit /claim upgrade.");
+                        + "was Fremde dürfen, stellst du mit /claim permissions ein, größer wird es mit /claim upgrade.");
             }
             case UPGRADE -> {
                 Claim claim = claims.find(action.claim);
@@ -276,6 +279,21 @@ public final class ClaimCommand implements CommandExecutor, TabCompleter {
         }
     }
 
+    /** Opens the plot the player stands on (read-only unless it is theirs), or their only plot. */
+    private void permissions(Player player) {
+        Claim claim = claims.at(player.getLocation());
+        if (claim == null) {
+            List<Claim> owned = claims.owned(player.getUniqueId());
+            if (owned.size() == 1) claim = owned.get(0);
+            else {
+                error(player, owned.isEmpty() ? "Stell dich auf ein Grundstück, um seine Rechte zu sehen."
+                        : "Stell dich auf das Grundstück, dessen Rechte du ändern möchtest.");
+                return;
+            }
+        }
+        permissionsMenu.open(player, claim);
+    }
+
     private void offer(Player player, String[] args, boolean forMoney) {
         if (args.length != (forMoney ? 3 : 2)) {
             error(player, forMoney ? "Verwendung: /claim sell <Spieler> <Preis>" : "Verwendung: /claim transfer <Spieler>");
@@ -337,7 +355,7 @@ public final class ClaimCommand implements CommandExecutor, TabCompleter {
             error(player, "Dafür reicht dein Kontostand nicht (" + coins(economy.balance(uuid)) + ").");
             return;
         }
-        // The new owner decides alone who may build; the seller keeps no access.
+        // The new owner decides alone who may build and what strangers may do; the seller keeps no access.
         claim.trusted().clear();
         claims.transfer(claim, uuid);
         success(player, "Das Grundstück bei " + claim.x() + ", " + claim.z() + " gehört jetzt dir.");
@@ -417,11 +435,12 @@ public final class ClaimCommand implements CommandExecutor, TabCompleter {
         ClaimRules rules = claims.rules();
         int owned = claims.owned(player.getUniqueId()).size();
         int side = rules.startRadius() * 2 + 1;
-        info(player, "Grundstücke schützen deine Base: Fremde können dort nichts abbauen, platzieren oder benutzen.");
+        info(player, "Grundstücke schützen deine Base: Fremde können dort nur, was du ihnen erlaubst.");
         info(player, "/claim buy – " + side + "×" + side + " Blöcke um deine Position"
                 + (owned < rules.maxPerPlayer() ? " für " + coins(rules.buyPrice(owned)) : ""));
         info(player, "/claim upgrade – vergrößert um " + rules.step() + " Blöcke Radius (bis Radius " + rules.maxRadius() + ")");
         info(player, "/claim trust|untrust <Spieler> – Mitbauen erlauben oder entziehen");
+        info(player, "/claim permissions – einstellen, was Fremde dürfen (Türen, Truhen, Tiere, PvP …)");
         info(player, "/claim sell <Spieler> <Preis> · /claim transfer <Spieler> – verkaufen oder verschenken");
         info(player, "/claim info · list · border · abandon");
     }

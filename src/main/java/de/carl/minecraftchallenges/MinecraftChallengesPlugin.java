@@ -12,7 +12,9 @@ import de.carl.minecraftchallenges.listener.ChallengeListener;
 import de.carl.minecraftchallenges.listener.LobbyListener;
 import de.carl.minecraftchallenges.jumpnrun.JumpAndRunListener;
 import de.carl.minecraftchallenges.jumpnrun.JumpAndRunService;
+import de.carl.minecraftchallenges.lobby.GameInstance;
 import de.carl.minecraftchallenges.lobby.GameLobbyRegistry;
+import de.carl.minecraftchallenges.util.RenderDistanceService;
 import de.carl.minecraftchallenges.lobby.ItemRestrictionService;
 import de.carl.minecraftchallenges.lobby.LobbyIsolationService;
 import de.carl.minecraftchallenges.menu.ChallengeMenu;
@@ -58,6 +60,7 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
     private NpcService npcs;
     private SpeedrunContest speedruns;
     private VanillaChatService vanillaChat;
+    private RenderDistanceService renderDistance;
 
     @Override
     public void onEnable() {
@@ -72,6 +75,7 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(playerActivity, this);
         lobbyService = new LobbyService(this);
         RankService rankService = new RankService(this, lobbyService);
+        new de.carl.minecraftchallenges.rank.NametagService(this);
         ChallengeSessionService sessions = new ChallengeSessionService();
         lobbies = new GameLobbyRegistry(this, lobbyService, sessions);
         try {
@@ -144,6 +148,10 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
         if (npcCommand != null) npcCommand.setExecutor(npcs);
         AdminMenu adminMenu = new AdminMenu();
         LobbyIsolationService isolation = new LobbyIsolationService(this, lobbyService, lobbies, smp);
+        if (smpFeatures != null) {
+            isolation.conceal(smpFeatures.spectate()::conceals);
+            smpFeatures.spectate().visibility(isolation::refreshVisibility);
+        }
 
         getServer().getPluginManager().registerEvents(
                 new LobbyListener(this, lobbyService, lobbies, challengeMenu, lobbyMenu, customMenu), this);
@@ -191,6 +199,19 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
             keepAliveCommand.setExecutor(executor);
             keepAliveCommand.setTabCompleter(executor);
         }
+        SmpService smpForScope = smp;
+        renderDistance = new RenderDistanceService(this, player -> {
+            GameInstance instance = lobbies.instance(player.getWorld());
+            if (instance != null) return instance.sessionKey();
+            return smpForScope != null && smpForScope.isSmpWorld(player.getWorld()) ? "smp" : null;
+        });
+        renderDistance.start();
+        PluginCommand renderDistanceCommand = getCommand("renderdistance");
+        if (renderDistanceCommand != null) {
+            RenderDistanceCommand executor = new RenderDistanceCommand(renderDistance);
+            renderDistanceCommand.setExecutor(executor);
+            renderDistanceCommand.setTabCompleter(executor);
+        }
         HelpCommand help = new HelpCommand(lobbyService, lobbies, smp);
         getServer().getPluginManager().registerEvents(help, this);
         PluginCommand helpCommand = getCommand("help");
@@ -233,7 +254,7 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
         SmpCommands smpCommands = smp == null ? null : new SmpCommands(smp);
         BackupCommand backupCommand = backups == null ? null : new BackupCommand(backups);
         List<String> names = new java.util.ArrayList<>(
-                List.of("sethome", "home", "spawn", "tpa", "tpaccept", "tpdeny", "pay", "money", "eco", "setspawn", "ec", "backup"));
+                List.of("sethome", "home", "spawn", "tpa", "tpaccept", "tpdeny", "pay", "money", "eco", "setspawn", "ec", "invsee", "backup"));
         names.addAll(SmpFeatures.commandNames());
         for (String name : names) {
             PluginCommand command = getCommand(name);
@@ -262,6 +283,7 @@ public final class MinecraftChallengesPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (renderDistance != null) renderDistance.shutdown();
         if (worldPreparation != null) worldPreparation.close();
         if (spongeTerrain != null) spongeTerrain.close();
         if (vanillaChat != null) vanillaChat.shutdown();

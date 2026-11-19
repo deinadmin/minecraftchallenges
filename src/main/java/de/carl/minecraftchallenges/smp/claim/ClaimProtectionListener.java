@@ -8,14 +8,20 @@ import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
+import org.bukkit.block.data.Ageable;
 import org.bukkit.block.data.Directional;
+import org.bukkit.entity.AbstractVillager;
 import org.bukkit.entity.AreaEffectCloud;
 import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Boat;
 import org.bukkit.entity.Enemy;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.FallingBlock;
 import org.bukkit.entity.Hanging;
 import org.bukkit.entity.Item;
+import org.bukkit.entity.ItemFrame;
+import org.bukkit.entity.LeashHitch;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Mob;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -26,7 +32,6 @@ import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockBurnEvent;
 import org.bukkit.event.block.BlockDispenseEvent;
@@ -39,12 +44,15 @@ import org.bukkit.event.block.BlockPistonExtendEvent;
 import org.bukkit.event.block.BlockPistonRetractEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockSpreadEvent;
+import org.bukkit.event.block.SignChangeEvent;
 import org.bukkit.event.block.TNTPrimeEvent;
+import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.EntityInteractEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.EntityPlaceEvent;
 import org.bukkit.event.hanging.HangingBreakByEntityEvent;
 import org.bukkit.event.hanging.HangingBreakEvent;
@@ -59,6 +67,7 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTakeLecternBookEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.vehicle.VehicleDamageEvent;
 import org.bukkit.event.vehicle.VehicleDestroyEvent;
 import org.bukkit.event.world.PortalCreateEvent;
@@ -74,9 +83,10 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * On a plot, only its owner and trusted players may change or use anything. Everyone else can walk
- * around and fight (PvP stays on). Indirect ways in are closed too: explosions, fire, liquids,
- * pistons, dispensers and hoppers do not work across a plot border.
+ * On a plot, its owner and trusted players may change and use everything. Strangers may only do what
+ * the owner allows in /claim permissions ({@link ClaimFlag}); monsters may always be fought. Indirect
+ * ways in are closed too: explosions, fire, liquids, pistons, dispensers and hoppers do not work
+ * across a plot border.
  */
 public final class ClaimProtectionListener implements Listener {
     private static final Set<Material> MODIFYING_ITEMS = EnumSet.of(
@@ -103,13 +113,31 @@ public final class ClaimProtectionListener implements Listener {
         return !claims.mayBuild(player, block);
     }
 
+    private boolean denied(Player player, Location location, ClaimFlag flag) {
+        return !claims.allows(player, location, flag);
+    }
+
+    private boolean denied(Player player, Block block, ClaimFlag flag) {
+        return !claims.allows(player, block, flag);
+    }
+
     private void notice(Player player, Location location) {
+        notice(player, location, ClaimFlag.BUILD);
+    }
+
+    private void notice(Player player, Location location, ClaimFlag flag) {
         long now = System.currentTimeMillis();
         if (now - lastNotice.getOrDefault(player.getUniqueId(), 0L) < NOTICE_MILLIS) return;
-        lastNotice.put(player.getUniqueId(), now);
         Claim claim = claims.at(location);
         if (claim == null) return;
-        player.sendActionBar(Component.text("Dieses Grundstück gehört " + claims.name(claim.owner()) + ".", NamedTextColor.RED));
+        lastNotice.put(player.getUniqueId(), now);
+        String owner = claims.name(claim.owner());
+        String text = switch (flag) {
+            case BUILD -> "Dieses Grundstück gehört " + owner + ".";
+            case PVP -> "Auf dem Grundstück von " + owner + " ist PvP aus.";
+            default -> "Grundstück von " + owner + " · Nicht erlaubt: " + flag.title();
+        };
+        player.sendActionBar(Component.text(text, NamedTextColor.RED));
     }
 
     /** True if something at {@code from} would reach into a plot it does not belong to. */
@@ -136,15 +164,33 @@ public final class ClaimProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBreak(BlockBreakEvent event) {
-        if (denied(event.getPlayer(), event.getBlock())) {
-            event.setCancelled(true);
-            notice(event.getPlayer(), event.getBlock().getLocation());
-        }
+        Player player = event.getPlayer();
+        Block block = event.getBlock();
+        if (!denied(player, block)) return;
+        boolean ripe = isRipe(block);
+        if (ripe && !denied(player, block, ClaimFlag.HARVEST)) return;
+        event.setCancelled(true);
+        notice(player, block.getLocation(), ripe ? ClaimFlag.HARVEST : ClaimFlag.BUILD);
+    }
+
+    /** Crops that strangers with {@link ClaimFlag#HARVEST} may break. Cane, cactus and bamboo keep their base. */
+    private static boolean isRipe(Block block) {
+        Material type = block.getType();
+        return switch (type) {
+            case MELON, PUMPKIN -> true;
+            case SUGAR_CANE, CACTUS, BAMBOO -> block.getRelative(BlockFace.DOWN).getType() == type;
+            case WHEAT, CARROTS, POTATOES, BEETROOTS, NETHER_WART, COCOA, PITCHER_CROP ->
+                    block.getBlockData() instanceof Ageable crop && crop.getAge() >= crop.getMaximumAge();
+            default -> false;
+        };
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent event) {
-        boolean denied = denied(event.getPlayer(), event.getBlock());
+        Player player = event.getPlayer();
+        Block block = event.getBlock();
+        boolean replant = ClaimFlag.isReplantable(block.getType()) && !denied(player, block, ClaimFlag.HARVEST);
+        boolean denied = !replant && denied(player, block);
         if (!denied && event instanceof BlockMultiPlaceEvent multi) {
             for (BlockState state : multi.getReplacedBlockStates()) denied |= denied(event.getPlayer(), state.getLocation());
         }
@@ -156,6 +202,7 @@ public final class ClaimProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBucketEmpty(PlayerBucketEmptyEvent event) {
+        if (isCauldron(event.getBlockClicked()) && !denied(event.getPlayer(), event.getBlockClicked(), ClaimFlag.COMPOSTER)) return;
         if (denied(event.getPlayer(), event.getBlock()) || denied(event.getPlayer(), event.getBlockClicked())) {
             event.setCancelled(true);
             notice(event.getPlayer(), event.getBlock().getLocation());
@@ -164,6 +211,7 @@ public final class ClaimProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBucketFill(PlayerBucketFillEvent event) {
+        if (isCauldron(event.getBlockClicked()) && !denied(event.getPlayer(), event.getBlockClicked(), ClaimFlag.COMPOSTER)) return;
         if (denied(event.getPlayer(), event.getBlockClicked())) {
             event.setCancelled(true);
             notice(event.getPlayer(), event.getBlockClicked().getLocation());
@@ -172,49 +220,82 @@ public final class ClaimProtectionListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBucketEntity(PlayerBucketEntityEvent event) {
-        if (denied(event.getPlayer(), event.getEntity().getLocation())) {
+        if (denied(event.getPlayer(), event.getEntity().getLocation(), ClaimFlag.ANIMALS)) {
             event.setCancelled(true);
-            notice(event.getPlayer(), event.getEntity().getLocation());
+            notice(event.getPlayer(), event.getEntity().getLocation(), ClaimFlag.ANIMALS);
         }
+    }
+
+    private static boolean isCauldron(Block block) {
+        return block != null && ClaimFlag.forBlock(block.getType()) == ClaimFlag.COMPOSTER;
     }
 
     /** Not ignoreCancelled: clicks in the air arrive pre-cancelled, clicks on blocks must still be checked. */
     @EventHandler(priority = EventPriority.HIGH)
     public void onInteract(PlayerInteractEvent event) {
         Block block = event.getClickedBlock();
-        if (block == null || !denied(event.getPlayer(), block)) return;
-        if (event.getAction() == Action.PHYSICAL) {
-            // Pressure plates, tripwires and farmland: strangers trigger nothing.
-            event.setCancelled(true);
-            return;
+        if (block == null || claims.at(block) == null) return;
+        Player player = event.getPlayer();
+        ClaimFlag blockFlag = ClaimFlag.forBlock(block.getType());
+        switch (event.getAction()) {
+            case PHYSICAL -> {
+                // Pressure plates, tripwires and farmland; turtle eggs and the like need build rights.
+                ClaimFlag flag = blockFlag == ClaimFlag.PRESSURE_PLATES || blockFlag == ClaimFlag.FARMLAND
+                        ? blockFlag : ClaimFlag.BUILD;
+                if (denied(player, block, flag)) event.setCancelled(true);
+            }
+            case LEFT_CLICK_BLOCK -> {
+                // A denied left click also stops digging, so it stays open for everything the player may break.
+                boolean allowed = !denied(player, block)
+                        || (isRipe(block) && !denied(player, block, ClaimFlag.HARVEST))
+                        || (blockFlag == ClaimFlag.NOTE_BLOCKS && !denied(player, block, ClaimFlag.NOTE_BLOCKS));
+                if (!allowed) event.setUseInteractedBlock(Event.Result.DENY);
+            }
+            case RIGHT_CLICK_BLOCK -> {
+                ClaimFlag denial = null;
+                if (denied(player, block, blockFlag)) {
+                    event.setUseInteractedBlock(Event.Result.DENY);
+                    if (block.getType().isInteractable()) denial = blockFlag;
+                }
+                // Food, shields, bows and pearls keep working, so fights on a plot stay fair.
+                ClaimFlag itemFlag = itemFlag(event.getItem());
+                if (itemFlag != null && denied(player, block, itemFlag)) {
+                    event.setUseItemInHand(Event.Result.DENY);
+                    if (denial == null) denial = itemFlag;
+                }
+                if (denial != null) notice(player, block.getLocation(), denial);
+            }
+            default -> { }
         }
-        if (event.getAction() != Action.RIGHT_CLICK_BLOCK && event.getAction() != Action.LEFT_CLICK_BLOCK) return;
-        event.setUseInteractedBlock(Event.Result.DENY);
-        boolean tell = event.getAction() == Action.RIGHT_CLICK_BLOCK && block.getType().isInteractable();
-        // Food, shields, bows and pearls keep working, so fights on a plot stay fair.
-        if (modifiesBlocks(event.getItem())) {
-            event.setUseItemInHand(Event.Result.DENY);
-            tell |= event.getAction() == Action.RIGHT_CLICK_BLOCK;
-        }
-        if (tell) notice(event.getPlayer(), block.getLocation());
     }
 
-    private static boolean modifiesBlocks(ItemStack item) {
-        if (item == null || item.isEmpty()) return false;
+    /** The flag a held item needs when used on a block, or null if it changes nothing there. */
+    private static ClaimFlag itemFlag(ItemStack item) {
+        if (item == null || item.isEmpty()) return null;
         Material type = item.getType();
-        if (MODIFYING_ITEMS.contains(type)) return true;
         String name = type.name();
-        return name.endsWith("_HOE") || name.endsWith("_AXE") || name.endsWith("_SHOVEL")
+        if (name.endsWith("_BOAT") || name.endsWith("_RAFT") || name.endsWith("MINECART")) return ClaimFlag.VEHICLES;
+        if (type == Material.LEAD) return ClaimFlag.ANIMALS;
+        if (MODIFYING_ITEMS.contains(type)) return ClaimFlag.BUILD;
+        boolean modifies = name.endsWith("_HOE") || name.endsWith("_AXE") || name.endsWith("_SHOVEL")
                 || name.endsWith("_SPAWN_EGG") || (name.endsWith("BUCKET") && type != Material.MILK_BUCKET)
-                || name.endsWith("_BOAT") || name.endsWith("_RAFT") || name.endsWith("MINECART")
                 || name.endsWith("_DYE");
+        return modifies ? ClaimFlag.BUILD : null;
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSignChange(SignChangeEvent event) {
+        if (denied(event.getPlayer(), event.getBlock(), ClaimFlag.SIGNS)) {
+            event.setCancelled(true);
+            notice(event.getPlayer(), event.getBlock().getLocation(), ClaimFlag.SIGNS);
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onLectern(PlayerTakeLecternBookEvent event) {
-        if (denied(event.getPlayer(), event.getLectern().getLocation())) {
+        if (denied(event.getPlayer(), event.getLectern().getLocation(), ClaimFlag.LECTERNS)) {
             event.setCancelled(true);
-            notice(event.getPlayer(), event.getLectern().getLocation());
+            notice(event.getPlayer(), event.getLectern().getLocation(), ClaimFlag.LECTERNS);
         }
     }
 
@@ -257,9 +338,11 @@ public final class ClaimProtectionListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onEntityPlace(EntityPlaceEvent event) {
         Player player = event.getPlayer();
-        if (player != null && denied(player, event.getEntity().getLocation())) {
+        if (player == null) return;
+        ClaimFlag flag = event.getEntity() instanceof Vehicle ? ClaimFlag.VEHICLES : ClaimFlag.BUILD;
+        if (denied(player, event.getEntity().getLocation(), flag)) {
             event.setCancelled(true);
-            notice(player, event.getEntity().getLocation());
+            notice(player, event.getEntity().getLocation(), flag);
         }
     }
 
@@ -267,27 +350,55 @@ public final class ClaimProtectionListener implements Listener {
     public void onInteractEntity(PlayerInteractEntityEvent event) {
         Entity entity = event.getRightClicked();
         Player player = event.getPlayer();
-        if (entity instanceof Player || !denied(player, entity.getLocation())) return;
-        // Your own pets, and plain boats or minecarts to ride, stay usable everywhere.
+        if (entity instanceof Player) return;
+        // Your own pets stay usable everywhere.
         if (entity instanceof Tameable pet && player.getUniqueId().equals(pet.getOwnerUniqueId())) return;
-        if (entity instanceof Vehicle && !(entity instanceof InventoryHolder)) return;
+        ClaimFlag flag = interactFlag(player, entity);
+        if (!denied(player, entity.getLocation(), flag)) return;
         event.setCancelled(true);
-        notice(player, entity.getLocation());
+        notice(player, entity.getLocation(), flag);
+    }
+
+    private static ClaimFlag interactFlag(Player player, Entity entity) {
+        // A chest boat is ridden with a plain click and opened while sneaking.
+        if (entity instanceof Boat && entity instanceof InventoryHolder) {
+            return player.isSneaking() ? ClaimFlag.CHESTS : ClaimFlag.VEHICLES;
+        }
+        if (entity instanceof Vehicle) return entity instanceof InventoryHolder ? ClaimFlag.CHESTS : ClaimFlag.VEHICLES;
+        if (entity instanceof AbstractVillager) return ClaimFlag.VILLAGERS;
+        if (entity instanceof ItemFrame || entity instanceof ArmorStand) return ClaimFlag.DECORATIONS;
+        if (entity instanceof LeashHitch || entity instanceof LivingEntity) return ClaimFlag.ANIMALS;
+        return ClaimFlag.BUILD;
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onArmorStand(PlayerArmorStandManipulateEvent event) {
-        if (denied(event.getPlayer(), event.getRightClicked().getLocation())) {
+        if (denied(event.getPlayer(), event.getRightClicked().getLocation(), ClaimFlag.DECORATIONS)) {
             event.setCancelled(true);
-            notice(event.getPlayer(), event.getRightClicked().getLocation());
+            notice(event.getPlayer(), event.getRightClicked().getLocation(), ClaimFlag.DECORATIONS);
         }
     }
 
-    /** PvP and fighting monsters stay possible; animals, villagers, pets and decorations are protected. */
+    /**
+     * Monsters may always be fought. PvP follows the plot rule; animals, villagers, pets and
+     * decorations follow the owner's permissions.
+     */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         Entity victim = event.getEntity();
-        if (victim instanceof Player || victim instanceof Enemy) return;
+        if (victim instanceof Player target) {
+            Player attacker = responsiblePlayer(event.getDamager());
+            if (attacker == null || attacker.equals(target)) return;
+            // Off on either side: nobody hides on a peaceful plot and shoots out of it.
+            Location where = pvpOff(target.getLocation()) ? target.getLocation()
+                    : pvpOff(attacker.getLocation()) ? attacker.getLocation() : null;
+            if (where != null) {
+                event.setCancelled(true);
+                notice(attacker, where, ClaimFlag.PVP);
+            }
+            return;
+        }
+        if (victim instanceof Enemy) return;
         Location location = victim.getLocation();
         if (claims.at(location) == null) return;
         Player attacker = responsiblePlayer(event.getDamager());
@@ -297,11 +408,19 @@ public final class ClaimProtectionListener implements Listener {
             if (explosion && (victim instanceof Hanging || victim instanceof ArmorStand)) event.setCancelled(true);
             return;
         }
-        if (!denied(attacker, location)) return;
+        // Hitting a frame takes its item out; armor stands and paintings break.
+        ClaimFlag flag = victim instanceof ItemFrame ? ClaimFlag.DECORATIONS
+                : victim instanceof LivingEntity && !(victim instanceof ArmorStand) ? ClaimFlag.PVE : ClaimFlag.BUILD;
+        if (!denied(attacker, location, flag)) return;
         // A guard animal that attacks you may be fought off.
         if (victim instanceof Mob mob && attacker.equals(mob.getTarget())) return;
         event.setCancelled(true);
-        notice(attacker, location);
+        notice(attacker, location, flag);
+    }
+
+    private boolean pvpOff(Location location) {
+        Claim claim = claims.at(location);
+        return claim != null && !claim.allows(ClaimFlag.PVP);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -326,14 +445,18 @@ public final class ClaimProtectionListener implements Listener {
                 || caught instanceof Enemy || caught instanceof Item) {
             return;
         }
-        if (denied(event.getPlayer(), caught.getLocation())) event.setCancelled(true);
+        ClaimFlag flag = caught instanceof LivingEntity && !(caught instanceof ArmorStand) ? ClaimFlag.ANIMALS : ClaimFlag.BUILD;
+        if (denied(event.getPlayer(), caught.getLocation(), flag)) event.setCancelled(true);
     }
 
     /** Arrows on buttons and target blocks, items thrown onto pressure plates. */
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onEntityInteract(EntityInteractEvent event) {
         Player player = responsiblePlayer(event.getEntity());
-        if (player != null && denied(player, event.getBlock())) event.setCancelled(true);
+        if (player == null) return;
+        ClaimFlag flag = ClaimFlag.forBlock(event.getBlock().getType());
+        if (flag != ClaimFlag.BUTTONS && flag != ClaimFlag.PRESSURE_PLATES) flag = ClaimFlag.BUILD;
+        if (denied(player, event.getBlock(), flag)) event.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -342,13 +465,53 @@ public final class ClaimProtectionListener implements Listener {
         if (claims.at(block) == null || event.getEntity() instanceof FallingBlock) return;
         Player player = responsiblePlayer(event.getEntity());
         if (player != null) {
-            if (denied(player, block)) {
+            // A player's own click (cake, berries, farmland) was already judged by its block; arrows need build rights.
+            ClaimFlag flag = event.getEntity() == player ? ClaimFlag.forBlock(block.getType()) : ClaimFlag.BUILD;
+            if (denied(player, block, flag)) {
                 event.setCancelled(true);
-                notice(player, block.getLocation());
+                notice(player, block.getLocation(), flag);
             }
         } else if (event.getEntity() instanceof Enemy) {
             // Endermen, withers, ravagers and silverfish leave plots alone.
             event.setCancelled(true);
+        }
+    }
+
+    /** Items lying on a plot; what a player dropped themselves they may always pick up again. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onPickup(EntityPickupItemEvent event) {
+        if (!(event.getEntity() instanceof Player player) || claims.isEmpty()) return;
+        Item item = event.getItem();
+        if (player.getUniqueId().equals(item.getThrower())) return;
+        if (denied(player, item.getLocation(), ClaimFlag.PICKUP)) event.setCancelled(true);
+    }
+
+    /** Pearls and chorus fruit do not carry strangers onto a plot unless the owner allows it. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onTeleport(PlayerTeleportEvent event) {
+        PlayerTeleportEvent.TeleportCause cause = event.getCause();
+        if (cause != PlayerTeleportEvent.TeleportCause.ENDER_PEARL
+                && cause != PlayerTeleportEvent.TeleportCause.CONSUMABLE_EFFECT) {
+            return;
+        }
+        Claim target = claims.at(event.getTo());
+        if (target == null || target == claims.at(event.getFrom())) return;
+        if (denied(event.getPlayer(), event.getTo(), ClaimFlag.ENDER_PEARLS)) {
+            event.setCancelled(true);
+            notice(event.getPlayer(), event.getTo(), ClaimFlag.ENDER_PEARLS);
+        }
+    }
+
+    /** With monster spawning off, no monster appears on the plot by itself. Spawners keep working. */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSpawn(CreatureSpawnEvent event) {
+        if (claims.isEmpty() || !(event.getEntity() instanceof Enemy)) return;
+        switch (event.getSpawnReason()) {
+            case NATURAL, PATROL, REINFORCEMENTS, VILLAGE_INVASION -> {
+                Claim claim = claims.at(event.getLocation());
+                if (claim != null && !claim.allows(ClaimFlag.MOB_SPAWNING)) event.setCancelled(true);
+            }
+            default -> { }
         }
     }
 

@@ -4,6 +4,7 @@ import de.carl.minecraftchallenges.smp.economy.ItemValues;
 import de.carl.minecraftchallenges.smp.economy.ItemValues.Entry;
 import de.carl.minecraftchallenges.smp.economy.ItemValues.Pool;
 import de.carl.minecraftchallenges.smp.economy.Market;
+import de.carl.minecraftchallenges.smp.economy.XpPrice;
 import de.carl.minecraftchallenges.smp.shop.DailyShop;
 import org.bukkit.Material;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -27,6 +28,7 @@ public final class EconomyTest {
         ItemValues values = shippedValues();
         sellingStaysBelowBuying(values);
         dailyShop(values);
+        xpPricing(values);
         System.out.println(checks + " economy checks passed.");
     }
 
@@ -116,6 +118,36 @@ public final class EconomyTest {
                 expect(offer.entry().pool() != Pool.TRADER, "Trader items never reach the daily shop");
             }
         }
+    }
+
+    /** /buylevel: vanilla XP curve, bottle-based base price and a bounded, split-proof demand surcharge. */
+    private static void xpPricing(ItemValues values) {
+        long running = 0;
+        for (int level = 0; level < 60; level++) {
+            expect(XpPrice.totalPoints(level) == running, "Total points at level " + level + " follow the vanilla curve");
+            running += XpPrice.pointsForLevel(level);
+        }
+        expect(XpPrice.totalPoints(30) == 1395, "Level 30 holds 1,395 points");
+        expect(XpPrice.pointsTo(10, 0.5f, 11) == XpPrice.pointsForLevel(10) - Math.round(0.5 * XpPrice.pointsForLevel(10)),
+                "Progress towards the next level is credited");
+        expect(XpPrice.pointsTo(20, 0f, 15) == 0, "A level already reached costs nothing");
+
+        double bottle = values.entry("EXPERIENCE_BOTTLE").value() / XpPrice.POINTS_PER_BOTTLE;
+        double thirty = XpPrice.totalPoints(30) * bottle;
+        expect(thirty > 2500 && thirty < 3500, "Level 0 to 30 costs about 3,000 coins at the base price");
+
+        double m = 0.5;
+        double k = 4000;
+        close(XpPrice.factor(m, k, 0), 1.0, "No demand, no surcharge");
+        close(XpPrice.factor(m, k, k), 1.25, "Half the surcharge after one demand depth");
+        expect(XpPrice.factor(m, k, 1e12) < 1 + m, "The surcharge never exceeds its maximum");
+        close(XpPrice.weightedPoints(m, k, 0, 0), 0, "Buying nothing costs nothing");
+        double whole = XpPrice.weightedPoints(m, k, 0, 3000);
+        double split = 0;
+        for (int index = 0; index < 10; index++) split += XpPrice.weightedPoints(m, k, index * 300, 300);
+        close(split, whole, 1e-6, "Splitting a purchase costs exactly the same");
+        expect(whole > 3000 && whole < 3000 * (1 + m), "Demand makes a purchase dearer, but by less than the maximum");
+        close(XpPrice.weightedPoints(0, k, 5000, 100), 100, "Without a surcharge only the points count");
     }
 
     private static void close(double actual, double expected, String message) {

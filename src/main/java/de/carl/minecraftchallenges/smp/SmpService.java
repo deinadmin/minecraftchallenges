@@ -43,6 +43,7 @@ public final class SmpService {
     private final SmpEconomy economy;
     private final SmpScoreboard scoreboard;
     private final EnderChestService enderChests;
+    private final InventorySeeService inventories;
     private final String worldName;
     private final Set<UUID> active = new HashSet<>();
     private final Set<UUID> joining = new HashSet<>();
@@ -56,7 +57,11 @@ public final class SmpService {
     }
     private final Map<String, Path> worldFolders = new LinkedHashMap<>();
     private final List<Runnable> reloadListeners = new ArrayList<>();
+    private final List<Runnable> flushListeners = new ArrayList<>();
     private java.util.function.Function<Player, net.kyori.adventure.text.Component> areaLabel = player -> null;
+    /** The real survival state of a player who temporarily plays as someone else (admin spectating); null otherwise. */
+    private java.util.function.Function<Player, SmpPlayerState> heldState = player -> null;
+    private java.util.function.Consumer<Player> beforeHeldLeave = player -> { };
     private World overworld;
     private World nether;
     private World end;
@@ -74,9 +79,11 @@ public final class SmpService {
                 plugin.getConfig().getString("smp.economy.currency", "Coins"));
         this.scoreboard = new SmpScoreboard(this);
         this.enderChests = new EnderChestService(plugin, this, profiles);
+        this.inventories = new InventorySeeService(plugin, this, profiles);
         if (!loadWorlds()) throw new IllegalStateException("Die SMP-Welten konnten nicht geladen werden.");
         available = true;
         plugin.getServer().getPluginManager().registerEvents(enderChests, plugin);
+        plugin.getServer().getPluginManager().registerEvents(inventories, plugin);
 
         long autosaveTicks = Math.max(10, plugin.getConfig().getInt("smp.autosave-seconds", 30)) * 20L;
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::autosave, autosaveTicks, autosaveTicks);
@@ -173,6 +180,10 @@ public final class SmpService {
         return enderChests;
     }
 
+    public InventorySeeService inventories() {
+        return inventories;
+    }
+
     public int maxPlayers() {
         return Math.max(1, plugin.getConfig().getInt("smp.max-players", 50));
     }
@@ -187,6 +198,32 @@ public final class SmpService {
 
     public boolean isEditing(Player player) {
         return editors.contains(player.getUniqueId());
+    }
+
+    /**
+     * Lets admin spectating keep the player's survival state aside: saves store the held state instead of the
+     * creative one, and {@code beforeLeave} hands the real state back before the player leaves the SMP.
+     */
+    public void holdStates(java.util.function.Function<Player, SmpPlayerState> held,
+                           java.util.function.Consumer<Player> beforeLeave) {
+        this.heldState = held;
+        this.beforeHeldLeave = beforeLeave;
+    }
+
+    /** True while the player's survival state is held aside, i.e. while an admin spectates invisibly. */
+    public boolean isHoldingState(Player player) {
+        return heldState.apply(player) != null;
+    }
+
+    /** Admins in the edit mode or spectating invisibly may build in claims and in the spawn area. */
+    public boolean bypassesProtection(Player player) {
+        return isEditing(player) || isHoldingState(player);
+    }
+
+    /** Writes the player's SMP state to disk now. */
+    public void save(Player player) {
+        SmpProfile profile = profiles.cached(player.getUniqueId());
+        if (isActive(player) && profile != null) saveNow(player, profile);
     }
 
     public SmpProfile profile(Player player) {
@@ -259,6 +296,7 @@ public final class SmpService {
 
     private void enter(Player player, SmpProfile profile) {
         enderChests.release(player.getUniqueId());
+        inventories.release(player.getUniqueId());
         boolean firstVisit = profile.survival() == null;
         SmpPlayerState state = firstVisit ? SmpPlayerState.fresh(new ItemStack[0], null) : profile.survival();
         player.closeInventory();
@@ -331,9 +369,12 @@ public final class SmpService {
     private void leave(Player player, boolean announce) {
         UUID uuid = player.getUniqueId();
         if (!active.remove(uuid)) return;
+        SmpPlayerState held = heldState.apply(player);
+        if (held != null) beforeHeldLeave.accept(player);
         if (announce) announce(player, player.getName() + " hat das SMP verlassen.");
         cancelTeleportWarmup(player, null);
         enderChests.release(uuid);
+        inventories.release(uuid);
         // Puts a cursor item back into the inventory before it is captured.
         player.closeInventory();
         SmpProfile profile = profiles.cached(uuid);
@@ -342,7 +383,7 @@ public final class SmpService {
                 // The survival state was stored when the edit mode started.
                 profile.editInventory(SmpPlayerState.copy(player.getInventory().getContents()));
             } else {
-                profile.survival(SmpPlayerState.capture(player));
+                profile.survival(held != null ? held : SmpPlayerState.capture(player));
             }
             profiles.save(profile);
         }
@@ -376,7 +417,10 @@ public final class SmpService {
     }
 
     private void saveNow(Player player, SmpProfile profile) {
-        if (editors.contains(player.getUniqueId())) {
+        SmpPlayerState held = heldState.apply(player);
+        if (held != null) {
+            profile.survival(held);
+        } else if (editors.contains(player.getUniqueId())) {
             profile.editInventory(SmpPlayerState.copy(player.getInventory().getContents()));
         } else {
             profile.survival(SmpPlayerState.capture(player));
@@ -384,10 +428,19 @@ public final class SmpService {
         profiles.save(profile);
     }
 
-    /** Writes every online SMP player to disk and waits until the files are written. */
+    /** Writes every online SMP player and every pending feature file to disk and waits until they are written. */
     public void saveAllAndFlush() {
         autosave();
+        flushListeners.forEach(Runnable::run);
         writer.flush();
+    }
+
+    /**
+     * Runs before a backup or a restore copies the data folder: features that save with a delay (quests, NPCs) write
+     * what is still pending, so the copy is complete.
+     */
+    public void onFlush(Runnable listener) {
+        flushListeners.add(listener);
     }
 
     private void updateScoreboards() {
@@ -411,6 +464,10 @@ public final class SmpService {
         }
         SmpProfile profile = profiles.cached(player.getUniqueId());
         if (profile == null) return;
+        if (isHoldingState(player)) {
+            Messages.send(player, Messages.Type.ERROR, "Verlasse zuerst das Zuschauen (Barriere in deiner Hotbar).");
+            return;
+        }
         cancelTeleportWarmup(player, null);
         if (editors.contains(player.getUniqueId())) {
             finishEditing(player, profile);
@@ -426,6 +483,7 @@ public final class SmpService {
 
     private void startEditing(Player player, SmpProfile profile) {
         enderChests.release(player.getUniqueId());
+        inventories.release(player.getUniqueId());
         player.closeInventory();
         profile.survival(SmpPlayerState.capture(player));
         profiles.save(profile);
@@ -442,6 +500,7 @@ public final class SmpService {
 
     private void finishEditing(Player player, SmpProfile profile) {
         enderChests.release(player.getUniqueId());
+        inventories.release(player.getUniqueId());
         player.closeInventory();
         profile.editInventory(SmpPlayerState.copy(player.getInventory().getContents()));
         editors.remove(player.getUniqueId());
@@ -639,11 +698,13 @@ public final class SmpService {
     public boolean beginMaintenance(String reason) {
         available = false;
         enderChests.releaseAll();
+        inventories.releaseAll();
         for (Player player : List.copyOf(Bukkit.getOnlinePlayers())) {
             if (!isSmpWorld(player.getWorld()) && !joining.contains(player.getUniqueId())) continue;
             lobby.sendToLobby(player);
             Messages.send(player, Messages.Type.INFO, reason);
         }
+        flushListeners.forEach(Runnable::run);
         writer.flush();
         boolean unloaded = true;
         for (World world : new ArrayList<>(List.of(overworld, nether, end))) {
@@ -687,6 +748,7 @@ public final class SmpService {
 
     public void shutdown() {
         enderChests.releaseAll();
+        inventories.releaseAll();
         for (UUID uuid : List.copyOf(active)) {
             Player player = Bukkit.getPlayer(uuid);
             if (player != null) leave(player, false);

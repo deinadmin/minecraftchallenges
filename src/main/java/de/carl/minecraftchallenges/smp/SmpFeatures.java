@@ -1,14 +1,19 @@
 package de.carl.minecraftchallenges.smp;
 
 import de.carl.minecraftchallenges.MinecraftChallengesPlugin;
+import de.carl.minecraftchallenges.smp.afk.AfkTokenCommand;
+import de.carl.minecraftchallenges.smp.afk.AfkTokenService;
 import de.carl.minecraftchallenges.smp.claim.ClaimBorders;
 import de.carl.minecraftchallenges.smp.claim.ClaimCommand;
+import de.carl.minecraftchallenges.smp.claim.ClaimPermissionsMenu;
 import de.carl.minecraftchallenges.smp.claim.ClaimProtectionListener;
 import de.carl.minecraftchallenges.smp.claim.ClaimService;
+import de.carl.minecraftchallenges.smp.economy.BuyLevelCommand;
 import de.carl.minecraftchallenges.smp.economy.ItemValues;
 import de.carl.minecraftchallenges.smp.economy.MarketService;
 import de.carl.minecraftchallenges.smp.economy.PricesMenu;
 import de.carl.minecraftchallenges.smp.economy.SellMenu;
+import de.carl.minecraftchallenges.smp.economy.XpMarket;
 import de.carl.minecraftchallenges.smp.npc.Artifacts;
 import de.carl.minecraftchallenges.smp.npc.NpcCommand;
 import de.carl.minecraftchallenges.smp.npc.NpcMenus;
@@ -17,6 +22,8 @@ import de.carl.minecraftchallenges.smp.npc.SmpNpcService;
 import de.carl.minecraftchallenges.smp.shop.DailyShop;
 import de.carl.minecraftchallenges.smp.shop.ShopCommand;
 import de.carl.minecraftchallenges.smp.shop.ShopMenu;
+import de.carl.minecraftchallenges.smp.spectate.AdminSpectateService;
+import de.carl.minecraftchallenges.smp.spectate.PositionCommand;
 import de.carl.minecraftchallenges.util.Messages;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.JoinConfiguration;
@@ -48,6 +55,7 @@ public final class SmpFeatures {
     private final ClaimService claims;
     private final SmpNpcService npcs;
     private final QuestService quests;
+    private final AdminSpectateService spectate;
 
     public SmpFeatures(MinecraftChallengesPlugin plugin, SmpService smp) throws IOException {
         this.plugin = plugin;
@@ -68,20 +76,41 @@ public final class SmpFeatures {
         commands.put("sell", shopCommand);
         commands.put("prices", shopCommand);
 
+        XpMarket xpMarket = new XpMarket(values, plugin.getConfig().getConfigurationSection("smp.economy.buylevel"),
+                data.resolve("xp-market.yml"), smp.writer(), plugin.getLogger());
+        smp.onReload(xpMarket::reload);
+        commands.put("buylevel", new BuyLevelCommand(smp, xpMarket));
+
         claims = new ClaimService(smp, data.resolve("claims.yml"), plugin.getConfig());
         smp.onReload(claims::reload);
         ClaimBorders borders = new ClaimBorders(plugin, smp, claims);
-        register(new ClaimProtectionListener(claims));
-        commands.put("claim", new ClaimCommand(smp, claims, borders));
+        ClaimPermissionsMenu permissionsMenu = new ClaimPermissionsMenu(claims);
+        register(new ClaimProtectionListener(claims), permissionsMenu);
+        commands.put("claim", new ClaimCommand(smp, claims, borders, permissionsMenu));
 
         npcs = new SmpNpcService(plugin, smp, values, claims, new Artifacts(plugin), data.resolve("npcs.yml"));
         quests = new QuestService(plugin, smp, npcs, data.resolve("quests.yml"));
         smp.onReload(npcs::reload);
         smp.onReload(quests::reload);
+        smp.onFlush(() -> {
+            npcs.flush();
+            quests.flush();
+        });
         register(npcs, quests, new NpcMenus(plugin, smp, npcs, quests));
         NpcCommand npcCommand = new NpcCommand(smp, npcs, quests);
         commands.put("quest", npcCommand);
         commands.put("smpnpc", npcCommand);
+
+        spectate = new AdminSpectateService(plugin, smp);
+        register(spectate);
+        commands.put("pos", new PositionCommand(smp, spectate));
+        commands.put("spectate", new de.carl.minecraftchallenges.smp.spectate.SpectateCommand(spectate));
+        commands.put("craftingtable", new CraftingTableCommand(smp));
+
+        AfkTokenService afkTokens = new AfkTokenService(plugin, smp, data.resolve("afktokens.yml"), smp.writer(),
+                plugin.getConfig().getConfigurationSection("smp.afk-tokens"));
+        smp.onReload(afkTokens::reload);
+        commands.put("afktoken", new AfkTokenCommand(smp, afkTokens));
 
         market.onNewDay(this::announceNewDay);
         plugin.getServer().getScheduler().runTaskTimer(plugin, () -> {
@@ -124,7 +153,7 @@ public final class SmpFeatures {
 
     /** Names of all commands this class serves; they answer "not available" while the SMP is down. */
     public static List<String> commandNames() {
-        return List.of("shop", "sell", "prices", "claim", "quest", "smpnpc");
+        return List.of("shop", "sell", "prices", "buylevel", "claim", "quest", "smpnpc", "pos", "spectate", "craftingtable", "afktoken");
     }
 
     public void registerCommands() {
@@ -136,7 +165,12 @@ public final class SmpFeatures {
         });
     }
 
+    public AdminSpectateService spectate() {
+        return spectate;
+    }
+
     public void shutdown() {
+        spectate.shutdown();
         quests.shutdown();
         npcs.shutdown();
     }

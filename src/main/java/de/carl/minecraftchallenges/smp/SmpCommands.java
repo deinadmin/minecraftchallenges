@@ -15,11 +15,12 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-/** /sethome, /home, /spawn, /tpa, /tpaccept, /tpdeny, /pay, /money, /ec and the admin commands /eco and /setspawn. */
+/** /sethome, /home, /spawn, /tpa, /tpaccept, /tpdeny, /pay, /money, /ec and the admin commands /eco, /setspawn and /invsee. */
 public final class SmpCommands implements CommandExecutor, TabCompleter {
     public static final String ECO_PERMISSION = "minecraftchallenges.command.eco";
     public static final String SETSPAWN_PERMISSION = "minecraftchallenges.command.smp-setspawn";
     public static final String EC_OTHERS_PERMISSION = "minecraftchallenges.command.ec-others";
+    public static final String INVSEE_PERMISSION = "minecraftchallenges.command.invsee";
 
     private final SmpService smp;
 
@@ -45,6 +46,7 @@ public final class SmpCommands implements CommandExecutor, TabCompleter {
             case "eco" -> eco(sender, args);
             case "setspawn" -> withPlayer(sender, this::setSpawn);
             case "ec" -> withPlayer(sender, player -> enderChest(player, args));
+            case "invsee" -> withPlayer(sender, player -> invsee(player, args));
             default -> { return false; }
         }
         return true;
@@ -86,6 +88,24 @@ public final class SmpCommands implements CommandExecutor, TabCompleter {
             return;
         }
         smp.enderChests().openOther(player, target.get());
+    }
+
+    private void invsee(Player player, String[] args) {
+        if (!player.hasPermission(INVSEE_PERMISSION)) {
+            Messages.sendSystem(player, Messages.Type.ERROR, "Dafür hast du keine Rechte.");
+            return;
+        }
+        if (args.length != 1) {
+            Messages.send(player, Messages.Type.ERROR, "Verwendung: /invsee <Spieler>");
+            return;
+        }
+        Player online = Bukkit.getPlayerExact(args[0]);
+        Optional<UUID> target = online != null ? Optional.of(online.getUniqueId()) : smp.economy().findAccount(args[0]);
+        if (target.isEmpty()) {
+            Messages.send(player, Messages.Type.ERROR, "Spieler „" + args[0] + "“ war noch nie im SMP.");
+            return;
+        }
+        smp.inventories().open(player, target.get());
     }
 
     private void pay(CommandSender sender, String[] args) {
@@ -218,6 +238,9 @@ public final class SmpCommands implements CommandExecutor, TabCompleter {
         }
         if (name.equals("pay") && args.length == 1) return playerNames(sender, args[0]);
         if (name.equals("money") && args.length == 1) return playerNames(sender, args[0]);
+        if (name.equals("invsee") && args.length == 1 && sender.hasPermission(INVSEE_PERMISSION)) {
+            return playerNames(sender, args[0]);
+        }
         if (name.equals("ec") && args.length == 1 && sender.hasPermission(EC_OTHERS_PERMISSION)) {
             return playerNames(sender, args[0]);
         }

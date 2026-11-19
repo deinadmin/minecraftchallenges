@@ -83,6 +83,9 @@ public final class SpawnProtectionListener implements Listener {
     private final SmpService smp;
     private final Map<UUID, Long> lastNotice = new HashMap<>();
     private final Set<UUID> insideSpawn = new HashSet<>();
+    /** Ticks of this listener (half a second each) until mobs near players at spawn are checked again. */
+    private static final int SWEEP_TICKS = 8;
+    private int sweepCountdown;
 
     public SpawnProtectionListener(Plugin plugin, SmpService smp) {
         this.smp = smp;
@@ -90,7 +93,7 @@ public final class SpawnProtectionListener implements Listener {
     }
 
     private boolean protectedFrom(Player player, Location location) {
-        return smp.isInSpawn(location) && !smp.isEditing(player);
+        return smp.isInSpawn(location) && !smp.bypassesProtection(player);
     }
 
     private void deny(Player player) {
@@ -103,6 +106,8 @@ public final class SpawnProtectionListener implements Listener {
     /** Shows the distance to the edge of the spawn and keeps mobs from chasing players inside it. */
     private void tick() {
         long now = System.currentTimeMillis();
+        boolean sweep = --sweepCountdown <= 0;
+        if (sweep) sweepCountdown = SWEEP_TICKS;
         for (Player player : Bukkit.getOnlinePlayers()) {
             UUID uuid = player.getUniqueId();
             boolean inside = smp.isActive(player) && smp.isInSpawn(player.getLocation());
@@ -122,8 +127,12 @@ public final class SpawnProtectionListener implements Listener {
                         .append(Component.text(left + (left == 1 ? " Block" : " Blöcke"), NamedTextColor.WHITE))
                         .append(Component.text(" bis zur Wildnis", NamedTextColor.GRAY)));
             }
-            for (Entity nearby : player.getNearbyEntities(32, 16, 32)) {
-                if (nearby instanceof Mob mob && player.equals(mob.getTarget())) mob.setTarget(null);
+            // onTarget stops new targets inside the spawn, so only mobs that were already chasing need a reset: right
+            // when the player walks in, plus a sweep every few seconds for mobs that keep a target without an event.
+            if (!wasInside || sweep) {
+                for (Mob mob : player.getWorld().getNearbyEntitiesByType(Mob.class, player.getLocation(), 32, 16, 32)) {
+                    if (player.equals(mob.getTarget())) mob.setTarget(null);
+                }
             }
         }
         lastNotice.keySet().removeIf(uuid -> Bukkit.getPlayer(uuid) == null);
@@ -250,7 +259,7 @@ public final class SpawnProtectionListener implements Listener {
         if (!smp.isInSpawn(event.getEntity().getLocation())) return;
         if (event instanceof HangingBreakByEntityEvent byEntity) {
             Player player = responsiblePlayer(byEntity.getRemover());
-            if (player != null && smp.isEditing(player)) return;
+            if (player != null && smp.bypassesProtection(player)) return;
             event.setCancelled(true);
             if (player != null) deny(player);
         } else if (event.getCause() == HangingBreakEvent.RemoveCause.EXPLOSION) {
@@ -298,7 +307,7 @@ public final class SpawnProtectionListener implements Listener {
             return;
         }
         Player attacker = responsiblePlayer(event.getDamager());
-        if (attacker != null && smp.isEditing(attacker)) return;
+        if (attacker != null && smp.bypassesProtection(attacker)) return;
         boolean explosion = event.getCause() == org.bukkit.event.entity.EntityDamageEvent.DamageCause.ENTITY_EXPLOSION
                 || event.getCause() == org.bukkit.event.entity.EntityDamageEvent.DamageCause.BLOCK_EXPLOSION;
         if (victim instanceof Player) {
@@ -329,7 +338,7 @@ public final class SpawnProtectionListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onVehicleDestroy(VehicleDestroyEvent event) {
         Player player = responsiblePlayer(event.getAttacker());
-        if (smp.isInSpawn(event.getVehicle().getLocation()) && (player == null || !smp.isEditing(player))) {
+        if (smp.isInSpawn(event.getVehicle().getLocation()) && (player == null || !smp.bypassesProtection(player))) {
             event.setCancelled(true);
         }
     }
@@ -361,7 +370,7 @@ public final class SpawnProtectionListener implements Listener {
     public void onIgnite(BlockIgniteEvent event) {
         if (!smp.isInSpawn(event.getBlock().getLocation())) return;
         Player player = event.getPlayer();
-        if (player != null && smp.isEditing(player)) return;
+        if (player != null && smp.bypassesProtection(player)) return;
         event.setCancelled(true);
         if (player != null) deny(player);
     }
@@ -406,14 +415,14 @@ public final class SpawnProtectionListener implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onEntityChangeBlock(EntityChangeBlockEvent event) {
         if (!smp.isInSpawn(event.getBlock().getLocation()) || event.getEntity() instanceof FallingBlock) return;
-        if (event.getEntity() instanceof Player player && smp.isEditing(player)) return;
+        if (event.getEntity() instanceof Player player && smp.bypassesProtection(player)) return;
         event.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onFertilize(BlockFertilizeEvent event) {
         if (!smp.isInSpawn(event.getBlock().getLocation())) return;
-        if (event.getPlayer() != null && smp.isEditing(event.getPlayer())) return;
+        if (event.getPlayer() != null && smp.bypassesProtection(event.getPlayer())) return;
         event.setCancelled(true);
     }
 

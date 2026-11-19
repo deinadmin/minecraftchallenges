@@ -59,6 +59,15 @@ public final class RankService implements Listener {
 
     private void applyPlayerListName(Player player) {
         player.playerListName(chatName(player));
+        int order = listOrder(player);
+        if (player.getPlayerListOrder() != order) player.setPlayerListOrder(order);
+    }
+
+    /** Higher values are listed first in the tab list: Admin, then Mod, then everyone else. */
+    public static int listOrder(Player player) {
+        if (player.hasPermission(ADMIN)) return 2;
+        if (player.hasPermission(MODERATOR)) return 1;
+        return 0;
     }
 
     public static Component chatName(Player player) {
@@ -71,6 +80,42 @@ public final class RankService implements Listener {
                     TextDecoration.BOLD);
         }
         return Component.text(player.getName(), NamedTextColor.GRAY);
+    }
+
+    /** A rank as it shows above heads: prefix and name colour, like the chat name. */
+    public enum Rank {
+        ADMIN(Component.text("Admin | ", NamedTextColor.RED, TextDecoration.BOLD), NamedTextColor.RED),
+        MOD(Component.text("Mod | ", NamedTextColor.GREEN, TextDecoration.BOLD), NamedTextColor.GREEN),
+        PLAYER(Component.empty(), NamedTextColor.GRAY);
+
+        private final Component prefix;
+        private final NamedTextColor color;
+
+        Rank(Component prefix, NamedTextColor color) {
+            this.prefix = prefix;
+            this.color = color;
+        }
+
+        public Component prefix() {
+            return prefix;
+        }
+
+        public NamedTextColor color() {
+            return color;
+        }
+    }
+
+    public static Rank rank(Player player) {
+        if (player.hasPermission(ADMIN)) return Rank.ADMIN;
+        if (player.hasPermission(MODERATOR)) return Rank.MOD;
+        return Rank.PLAYER;
+    }
+
+    /** Exactly what the name tag above the player's head shows, e.g. for a mannequin standing in for them. */
+    public static Component nametag(Player player) {
+        Rank rank = rank(player);
+        return Component.text().append(rank.prefix())
+                .append(Component.text(player.getName(), rank.color())).build();
     }
 
     private Component chatMessage(Player player, Component message) {

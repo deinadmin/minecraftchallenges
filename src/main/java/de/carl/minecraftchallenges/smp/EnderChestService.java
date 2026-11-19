@@ -89,7 +89,8 @@ public final class EnderChestService implements Listener {
         closeView(viewer);
         viewer.closeInventory();
         // Items may only move between survival inventories of the SMP; everywhere else the view is read-only.
-        boolean readOnly = !smp.isActive(viewer) || smp.isEditing(viewer) || viewer.isDead();
+        boolean readOnly = !smp.isActive(viewer) || smp.isEditing(viewer) || smp.isHoldingState(viewer)
+                || viewer.isDead();
         Player online = Bukkit.getPlayer(target);
         Inventory inventory;
         String name;

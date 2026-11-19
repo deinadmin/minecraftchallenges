@@ -369,8 +369,13 @@ public final class SmpNpcService implements Listener {
     }
 
     public void shutdown() {
-        if (pendingSave != null) save();
+        flush();
         despawnAll();
+    }
+
+    /** Writes a save that {@link #saveSoon()} is still waiting on; does nothing if none is pending. */
+    public void flush() {
+        if (pendingSave != null) save();
     }
 
     private void rebuildIndex() {

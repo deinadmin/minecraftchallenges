@@ -1,7 +1,9 @@
 package de.carl.minecraftchallenges.smp;
 
 import de.carl.minecraftchallenges.smp.claim.Claim;
+import de.carl.minecraftchallenges.smp.claim.ClaimFlag;
 import de.carl.minecraftchallenges.smp.claim.ClaimRules;
+import org.bukkit.Material;
 
 import java.util.UUID;
 
@@ -42,7 +44,56 @@ public final class ClaimRulesTest {
         expect(rules.touchesSpawn(200, 0, 20, 0, 0, 150), "180 blocks from spawn is still too close");
         expect(!rules.touchesSpawn(201, 0, 20, 0, 0, 150), "One block further is fine");
         expect(!rules.touchesSpawn(150, 150, 20, 0, 0, 150), "The round spawn leaves the diagonal free");
+        flags();
         System.out.println(checks + " claim rule checks passed.");
+    }
+
+    /** What strangers may do: defaults, the menu layout and which flag each block needs. */
+    private static void flags() {
+        Claim fresh = new Claim(UUID.randomUUID(), UUID.randomUUID(), 0, 0, 20, 150);
+        expect(fresh.allows(ClaimFlag.CRAFTING_TABLE) && fresh.allows(ClaimFlag.ENDER_CHEST)
+                && fresh.allows(ClaimFlag.PVP) && fresh.allows(ClaimFlag.MOB_SPAWNING), "Harmless basics and plot rules start on");
+        expect(!fresh.allows(ClaimFlag.BUILD) && !fresh.allows(ClaimFlag.CHESTS) && !fresh.allows(ClaimFlag.DOORS)
+                && !fresh.allows(ClaimFlag.PVE), "Building, chests, doors and hurting animals start off");
+        expect(fresh.allowed().equals(ClaimFlag.defaults()), "A new plot has exactly the defaults");
+        for (ClaimFlag.Category category : ClaimFlag.Category.values()) {
+            int size = category.flags().size();
+            expect(category == ClaimFlag.Category.RULES ? size <= 2 : size > 0 && size <= 7,
+                    category + " fits its menu row (" + size + ")");
+        }
+        expect(!ClaimFlag.visitorFlags().contains(ClaimFlag.PVP) && ClaimFlag.visitorFlags().contains(ClaimFlag.BUILD),
+                "Bulk buttons leave the plot rules alone");
+        for (ClaimFlag flag : ClaimFlag.values()) {
+            expect(ClaimFlag.fromKey(flag.key()) == flag, flag + " survives claims.yml");
+            expect(!flag.description().isEmpty(), flag + " explains itself");
+        }
+        expect(ClaimFlag.fromKey("no-such-flag") == null, "Unknown keys from claims.yml are ignored");
+
+        expect(ClaimFlag.forBlock(Material.OAK_DOOR) == ClaimFlag.DOORS
+                && ClaimFlag.forBlock(Material.COPPER_DOOR) == ClaimFlag.DOORS, "Doors");
+        expect(ClaimFlag.forBlock(Material.SPRUCE_TRAPDOOR) == ClaimFlag.GATES
+                && ClaimFlag.forBlock(Material.BIRCH_FENCE_GATE) == ClaimFlag.GATES, "Trapdoors are not doors");
+        expect(ClaimFlag.forBlock(Material.CHEST) == ClaimFlag.CHESTS && ClaimFlag.forBlock(Material.TRAPPED_CHEST) == ClaimFlag.CHESTS
+                && ClaimFlag.forBlock(Material.COPPER_CHEST) == ClaimFlag.CHESTS
+                && ClaimFlag.forBlock(Material.LIME_SHULKER_BOX) == ClaimFlag.CHESTS, "Every kind of chest");
+        expect(ClaimFlag.forBlock(Material.ENDER_CHEST) == ClaimFlag.ENDER_CHEST, "The ender chest is no chest");
+        expect(ClaimFlag.forBlock(Material.OAK_SHELF) == ClaimFlag.SHELVES
+                && ClaimFlag.forBlock(Material.BOOKSHELF) == ClaimFlag.BUILD, "Shelves hold items, plain bookshelves do not");
+        expect(ClaimFlag.forBlock(Material.OAK_PRESSURE_PLATE) == ClaimFlag.PRESSURE_PLATES
+                && ClaimFlag.forBlock(Material.TRIPWIRE) == ClaimFlag.PRESSURE_PLATES, "Plates and tripwires");
+        expect(ClaimFlag.forBlock(Material.STONE_BUTTON) == ClaimFlag.BUTTONS && ClaimFlag.forBlock(Material.LEVER) == ClaimFlag.BUTTONS,
+                "Buttons and levers");
+        expect(ClaimFlag.forBlock(Material.RED_BED) == ClaimFlag.BEDS, "Beds");
+        expect(ClaimFlag.forBlock(Material.OAK_HANGING_SIGN) == ClaimFlag.SIGNS
+                && ClaimFlag.forBlock(Material.OAK_WALL_SIGN) == ClaimFlag.SIGNS, "Every kind of sign");
+        expect(ClaimFlag.forBlock(Material.WATER_CAULDRON) == ClaimFlag.COMPOSTER, "Cauldrons go with composters");
+        expect(ClaimFlag.forBlock(Material.POTTED_CACTUS) == ClaimFlag.FLOWER_POTS
+                && ClaimFlag.forBlock(Material.RED_CANDLE_CAKE) == ClaimFlag.CAKE, "Potted plants and candle cakes");
+        expect(ClaimFlag.forBlock(Material.CRAFTER) == ClaimFlag.HOPPERS, "The crafter");
+        expect(ClaimFlag.forBlock(Material.DRAGON_EGG) == ClaimFlag.BUILD
+                && ClaimFlag.forBlock(Material.VAULT) == ClaimFlag.BUILD, "Everything else needs build rights");
+        expect(ClaimFlag.isReplantable(Material.WHEAT) && !ClaimFlag.isReplantable(Material.OAK_SAPLING),
+                "Crops may be replanted, trees not");
     }
 
     private static void expect(boolean value, String message) {

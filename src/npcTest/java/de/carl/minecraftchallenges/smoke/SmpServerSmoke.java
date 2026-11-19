@@ -3,6 +3,7 @@ package de.carl.minecraftchallenges.smoke;
 import de.carl.minecraftchallenges.MinecraftChallengesPlugin;
 import de.carl.minecraftchallenges.smp.SmpService;
 import de.carl.minecraftchallenges.smp.claim.Claim;
+import de.carl.minecraftchallenges.smp.claim.ClaimFlag;
 import de.carl.minecraftchallenges.smp.claim.ClaimService;
 import de.carl.minecraftchallenges.smp.economy.ItemValues;
 import de.carl.minecraftchallenges.smp.economy.MarketService;
@@ -59,19 +60,47 @@ public final class SmpServerSmoke extends JavaPlugin {
                 smp = (SmpService) field(plugin, "smp");
                 features = field(plugin, "smpFeatures");
                 expect(smp != null && features != null, "The SMP and its features start");
-                for (String name : List.of("shop", "sell", "prices", "claim", "quest", "smpnpc")) {
+                for (String name : List.of("shop", "sell", "prices", "claim", "quest", "smpnpc", "pos", "spectate", "craftingtable", "buylevel", "ec", "invsee", "afktoken")) {
                     PluginCommand command = getServer().getPluginCommand(name);
                     expect(command != null && command.getExecutor() != plugin, "/" + name + " is registered");
                 }
+                expect(getServer().getPluginCommand("buylevel").getExecutor()
+                        instanceof de.carl.minecraftchallenges.smp.economy.BuyLevelCommand, "/buylevel sells levels");
                 economy();
+                afkTokens();
                 artifacts();
                 npcs();
+                placedBlocks();
+                spectating();
                 claims();
                 structures().thenCompose(ignored -> traders()).thenCompose(ignored -> walkingQuestGiver()).whenComplete((ignored, error) -> finish(error));
             } catch (Throwable error) {
                 finish(error);
             }
         });
+    }
+
+    private void afkTokens() {
+        MinecraftChallengesPlugin plugin = (MinecraftChallengesPlugin) getServer().getPluginManager().getPlugin("MinecraftChallenges");
+        Object command = getServer().getPluginCommand("afktoken").getExecutor();
+        expect(command instanceof de.carl.minecraftchallenges.smp.afk.AfkTokenCommand, "/afktoken keeps chunks loaded");
+        de.carl.minecraftchallenges.smp.afk.AfkTokenService tokens =
+                (de.carl.minecraftchallenges.smp.afk.AfkTokenService) field(command, "tokens");
+        org.bukkit.World world = smp.overworld();
+        Location spot = new Location(world, 3000.5, 70, -3000.5);
+        var token = tokens.create(spot, 3_600_000L, UUID.randomUUID(), "Smoke");
+        int cx = token.chunkX(), cz = token.chunkZ();
+        expect(world.isChunkLoaded(cx, cz) && world.getPluginChunkTickets(cx, cz).contains(plugin),
+                "An AFK token puts a plugin ticket on exactly its chunk");
+        expect(!world.getPluginChunkTickets(cx + 1, cz).contains(plugin), "Its neighbour gets no ticket");
+        var renewed = tokens.create(spot.clone().add(3, 0, 3), 7_200_000L, UUID.randomUUID(), "Smoke");
+        expect(renewed.id() == token.id() && tokens.all().size() == 1 && renewed.expiresAt() > token.expiresAt(),
+                "A second token in the same chunk renews the first");
+        var capped = tokens.create(spot.clone().add(64, 0, 0), 365L * 86_400_000L, UUID.randomUUID(), "Smoke");
+        expect(capped.remaining(System.currentTimeMillis()) <= tokens.maxMillis(), "Durations are capped at max-days");
+        expect(tokens.delete(capped.id()) && tokens.delete(token.id()), "Tokens can be deleted");
+        expect(!world.getPluginChunkTickets(cx, cz).contains(plugin) && tokens.all().isEmpty(),
+                "Deleting a token releases its chunk");
     }
 
     private void economy() {
@@ -224,6 +253,19 @@ public final class SmpServerSmoke extends JavaPlugin {
         BlockBurnEvent burn = new BlockBurnEvent(inside, outside);
         Bukkit.getPluginManager().callEvent(burn);
         expect(burn.isCancelled(), "Fire from outside burns nothing on a plot");
+
+        // Permissions survive a reload and do not pass to a new owner.
+        claims.setAllowed(claim, ClaimFlag.DOORS, true);
+        claims.setAllowed(claim, ClaimFlag.PVP, false);
+        smp.writer().flush();
+        claims.reload();
+        Claim reloaded = claims.find(claim.id());
+        expect(reloaded != null && reloaded.allows(ClaimFlag.DOORS) && !reloaded.allows(ClaimFlag.PVP)
+                && reloaded.allows(ClaimFlag.CRAFTING_TABLE) && !reloaded.allows(ClaimFlag.CHESTS), "Permissions survive a reload");
+        claims.transfer(reloaded, stranger);
+        expect(reloaded.allowed().equals(ClaimFlag.defaults()), "A new owner starts with the default permissions");
+        claim = reloaded;
+        neighbour = claims.find(neighbour.id());
 
         claims.remove(neighbour);
         claims.remove(claim);
@@ -488,9 +530,230 @@ public final class SmpServerSmoke extends JavaPlugin {
     }
 
     private void finish(Throwable error) {
+        if (error == null) {
+            try {
+                var board = getServer().getScoreboardManager().getMainScoreboard();
+                var admin = board.getTeam("mc_rank_admin");
+                var mod = board.getTeam("mc_rank_mod");
+                var player = board.getTeam("mc_rank_player");
+                expect(admin != null && mod != null && player != null
+                                && net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText()
+                                .serialize(admin.prefix()).equals("Admin | ")
+                                && admin.color() == net.kyori.adventure.text.format.NamedTextColor.RED
+                                && player.color() == net.kyori.adventure.text.format.NamedTextColor.GRAY,
+                        "Rank teams give name tags the rank prefix and colour");
+            } catch (Throwable failure) {
+                error = failure;
+            }
+        }
         if (error == null) getLogger().info("SMP_SMOKE_PASSED: " + checks + " checks");
         else { getLogger().severe("SMP_SMOKE_FAILED: " + error); error.printStackTrace(); }
         Bukkit.shutdown();
+    }
+
+    /** Mining quests: a piston carries the "placed" mark along, and pending saves are written before a backup. */
+    private void placedBlocks() throws Exception {
+        Object quests = field(features, "quests");
+        var remember = quests.getClass().getDeclaredMethod("rememberPlaced", org.bukkit.block.Block.class);
+        var forget = quests.getClass().getDeclaredMethod("forgetPlaced", org.bukkit.block.Block.class);
+        remember.setAccessible(true);
+        forget.setAccessible(true);
+        World world = smp.overworld();
+        Location spawn = world.getSpawnLocation();
+        int x = spawn.getBlockX() + 40;
+        int z = spawn.getBlockZ() + 40;
+        world.getChunkAt(x >> 4, z >> 4).load(true);
+        org.bukkit.block.Block piston = world.getBlockAt(x, 220, z);
+        piston.setType(Material.STICKY_PISTON);
+        var facing = (org.bukkit.block.data.Directional) piston.getBlockData();
+        facing.setFacing(org.bukkit.block.BlockFace.EAST);
+        piston.setBlockData(facing);
+        org.bukkit.block.Block near = piston.getRelative(org.bukkit.block.BlockFace.EAST);
+        org.bukkit.block.Block far = near.getRelative(org.bukkit.block.BlockFace.EAST);
+
+        near.setType(Material.GOLD_BLOCK);
+        remember.invoke(quests, near);
+        Bukkit.getPluginManager().callEvent(new org.bukkit.event.block.BlockPistonExtendEvent(piston, List.of(near),
+                org.bukkit.block.BlockFace.EAST));
+        boolean pushedPlaced = (boolean) forget.invoke(quests, far);
+        boolean oldSpotPlaced = (boolean) forget.invoke(quests, near);
+        expect(pushedPlaced && !oldSpotPlaced, "A placed gold block stays placed when a piston pushes it");
+
+        near.setType(Material.AIR);
+        far.setType(Material.GOLD_BLOCK);
+        remember.invoke(quests, far);
+        Bukkit.getPluginManager().callEvent(new org.bukkit.event.block.BlockPistonRetractEvent(piston, List.of(far),
+                org.bukkit.block.BlockFace.WEST));
+        boolean pulledPlaced = (boolean) forget.invoke(quests, near);
+        boolean leftPlaced = (boolean) forget.invoke(quests, far);
+        expect(pulledPlaced && !leftPlaced, "A sticky piston pulls the mark back with the block");
+
+        far.setType(Material.AIR);
+        near.setType(Material.MELON);
+        remember.invoke(quests, near);
+        Bukkit.getPluginManager().callEvent(new org.bukkit.event.block.BlockPistonExtendEvent(piston, List.of(near),
+                org.bukkit.block.BlockFace.EAST));
+        boolean melonMoved = (boolean) forget.invoke(quests, far);
+        boolean melonLeft = (boolean) forget.invoke(quests, near);
+        expect(!melonMoved && !melonLeft, "A melon a piston breaks leaves no mark behind");
+        near.setType(Material.AIR);
+        piston.setType(Material.AIR);
+
+        SmpNpcService npcs = (SmpNpcService) field(features, "npcs");
+        SmpNpc giver = npcs.createQuestGiver(NpcArchetype.get("village"), new Location(world, x + 0.5, 221, z + 0.5), null);
+        boolean waiting = field(npcs, "pendingSave") != null;
+        smp.saveAllAndFlush();
+        expect(waiting && field(npcs, "pendingSave") == null, "A backup writes the NPC save that was still waiting");
+        npcs.remove(giver);
+    }
+
+    /** Admin spectating: blocks vanish silently with what stood on them, and the tab-list packet resolves. */
+    private void spectating() throws Exception {
+        expect(getServer().getPluginCommand("ct") != null, "/ct is an alias of /craftingtable");
+        new de.carl.minecraftchallenges.util.TabListPackets();
+        expect(true, "The tab-list packet for invisible admins exists on this server");
+
+        Location dressing = smp.overworld().getSpawnLocation().clone().add(0, 200, 0);
+        Mannequin source = smp.overworld().spawn(dressing, Mannequin.class, m -> {
+            m.setPersistent(false);
+            m.getEquipment().setHelmet(new ItemStack(Material.DIAMOND_HELMET));
+            m.getEquipment().setItemInMainHand(new ItemStack(Material.IRON_PICKAXE));
+        });
+        Mannequin twin = smp.overworld().spawn(dressing, Mannequin.class, m -> {
+            m.setPersistent(false);
+            de.carl.minecraftchallenges.smp.spectate.AdminSpectateService.wear(m, source.getEquipment());
+        });
+        boolean dressed = twin.getEquipment().getHelmet().getType() == Material.DIAMOND_HELMET
+                && twin.getEquipment().getItemInMainHand().getType() == Material.IRON_PICKAXE;
+        source.remove();
+        twin.remove();
+        expect(dressed, "The spectator's double is dressed while it spawns");
+
+        mobsIgnoreHidden(dressing);
+
+        World world = smp.overworld();
+        Location spawn = world.getSpawnLocation();
+        int x = spawn.getBlockX() + 60;
+        int z = spawn.getBlockZ() + 60;
+        world.getChunkAt(x >> 4, z >> 4).load(true);
+        Block base = world.getBlockAt(x, 230, z);
+        base.setType(Material.STONE);
+        Block torch = base.getRelative(BlockFace.UP);
+        torch.setType(Material.TORCH);
+        Block wallTorch = base.getRelative(BlockFace.NORTH);
+        var wall = (org.bukkit.block.data.Directional) Material.WALL_TORCH.createBlockData();
+        wall.setFacing(BlockFace.NORTH);
+        wallTorch.setBlockData(wall, false);
+        int removed = de.carl.minecraftchallenges.smp.spectate.SilentBlocks.breakSilently(base);
+        expect(base.getType().isAir() && torch.getType().isAir() && wallTorch.getType().isAir() && removed == 3,
+                "A silent break also removes the torches that stood on the block (" + removed + ")");
+
+        Block floor = world.getBlockAt(x + 3, 229, z);
+        floor.setType(Material.STONE);
+        Block lower = floor.getRelative(BlockFace.UP);
+        Block upper = lower.getRelative(BlockFace.UP);
+        var bottom = (org.bukkit.block.data.type.Door) Material.OAK_DOOR.createBlockData();
+        bottom.setHalf(org.bukkit.block.data.Bisected.Half.BOTTOM);
+        var top = (org.bukkit.block.data.type.Door) Material.OAK_DOOR.createBlockData();
+        top.setHalf(org.bukkit.block.data.Bisected.Half.TOP);
+        lower.setBlockData(bottom, false);
+        upper.setBlockData(top, false);
+        var items = world.getNearbyEntities(upper.getLocation(), 4, 4, 4, entity -> entity instanceof org.bukkit.entity.Item).size();
+        de.carl.minecraftchallenges.smp.spectate.SilentBlocks.breakSilently(upper);
+        int itemsAfter = world.getNearbyEntities(upper.getLocation(), 4, 4, 4, entity -> entity instanceof org.bukkit.entity.Item).size();
+        expect(upper.getType().isAir() && lower.getType().isAir() && itemsAfter == items,
+                "Breaking the upper door half removes the whole door without drops");
+
+        Block chest = world.getBlockAt(x + 6, 230, z);
+        chest.setType(Material.CHEST);
+        ((org.bukkit.block.Chest) chest.getState(false)).getBlockInventory().addItem(new ItemStack(Material.DIAMOND, 3));
+        de.carl.minecraftchallenges.smp.spectate.SilentBlocks.breakSilently(chest);
+        long diamonds = world.getNearbyEntities(chest.getLocation(), 3, 3, 3, entity -> entity instanceof org.bukkit.entity.Item item
+                && item.getItemStack().getType() == Material.DIAMOND).size();
+        expect(chest.getType().isAir() && diamonds == 1, "A silently broken chest still spills its items like in creative");
+        floor.setType(Material.AIR);
+    }
+
+    /** A mob's look-at goal rejects a hidden target, but still accepts it once it is visible again. */
+    private void mobsIgnoreHidden(Location at) throws Exception {
+        Class<?> type = Class.forName("de.carl.minecraftchallenges.smp.spectate.MobAwareness");
+        var constructor = type.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        Object awareness = constructor.newInstance();
+        var patch = type.getDeclaredMethod("patch", org.bukkit.entity.Mob.class);
+        var hide = type.getDeclaredMethod("hideHandle", Object.class);
+        var reveal = type.getDeclaredMethod("revealHandle", Object.class);
+        patch.setAccessible(true);
+        hide.setAccessible(true);
+        reveal.setAccessible(true);
+        World world = at.getWorld();
+        org.bukkit.entity.Villager watcher = world.spawn(at, org.bukkit.entity.Villager.class, v -> v.setPersistent(false));
+        org.bukkit.entity.Zombie looker = world.spawn(at, org.bukkit.entity.Zombie.class, z -> z.setPersistent(false));
+        org.bukkit.entity.Cow target = world.spawn(at.clone().add(1, 0, 0), org.bukkit.entity.Cow.class, c -> c.setPersistent(false));
+        try {
+            patch.invoke(awareness, looker);
+            Object lookerHandle = looker.getClass().getMethod("getHandle").invoke(looker);
+            Object targetHandle = target.getClass().getMethod("getHandle").invoke(target);
+            Object level = world.getClass().getMethod("getHandle").invoke(world);
+            Class<?> living = Class.forName("net.minecraft.world.entity.LivingEntity");
+            Class<?> serverLevel = Class.forName("net.minecraft.server.level.ServerLevel");
+            Class<?> conditionsType = Class.forName("net.minecraft.world.entity.ai.targeting.TargetingConditions");
+            var test = conditionsType.getMethod("test", serverLevel, living, living);
+            Object conditions = conditionsType.getMethod("forNonCombat").invoke(null);
+            conditions = conditionsType.getMethod("range", double.class).invoke(conditions, 8.0);
+            // A fresh condition, filtered through the shared sensor conditions: patch one by hand like a goal's.
+            var patchConditions = type.getDeclaredMethod("patchConditions", Object.class);
+            patchConditions.setAccessible(true);
+            patchConditions.invoke(awareness, conditions);
+            boolean before = (boolean) test.invoke(conditions, level, lookerHandle, targetHandle);
+            hide.invoke(awareness, targetHandle);
+            boolean hidden = (boolean) test.invoke(conditions, level, lookerHandle, targetHandle);
+            var sensorConditions = Class.forName("net.minecraft.world.entity.ai.sensing.Sensor").getDeclaredField("TARGET_CONDITIONS");
+            sensorConditions.setAccessible(true);
+            boolean sensorHidden = (boolean) test.invoke(sensorConditions.get(null), level,
+                    watcher.getClass().getMethod("getHandle").invoke(watcher), targetHandle);
+            reveal.invoke(awareness, targetHandle);
+            boolean after = (boolean) test.invoke(conditions, level, lookerHandle, targetHandle);
+            expect(before && !hidden && !sensorHidden && after,
+                    "Mobs and villager sensors ignore a hidden spectator and notice it again afterwards");
+
+            var priority = type.getDeclaredMethod("playerLookPriority", org.bukkit.entity.Mob.class);
+            priority.setAccessible(true);
+            org.bukkit.entity.Cod cod = world.spawn(at, org.bukkit.entity.Cod.class, c -> c.setPersistent(false));
+            Object zombiePriority = priority.invoke(awareness, looker);
+            Object villagerPriority = priority.invoke(awareness, watcher);
+            Object codPriority = priority.invoke(awareness, cod);
+            cod.remove();
+            expect(zombiePriority != null && Integer.valueOf(8).equals(villagerPriority) && codPriority == null,
+                    "Mobs that look at players learn to look at the double (zombie " + zombiePriority
+                            + ", villager " + villagerPriority + ", cod " + codPriority + ")");
+
+            Mannequin body = world.spawn(at.clone().add(2, 0, 0), Mannequin.class, m -> m.setPersistent(false));
+            Class<?> goalType = Class.forName("de.carl.minecraftchallenges.smp.spectate.LookAtDoubleGoal");
+            var goalConstructor = goalType.getDeclaredConstructor(com.destroystokyo.paper.entity.ai.GoalKey.class,
+                    org.bukkit.entity.Mob.class, java.util.function.Function.class, java.util.function.Predicate.class);
+            goalConstructor.setAccessible(true);
+            var key = com.destroystokyo.paper.entity.ai.GoalKey.of(org.bukkit.entity.Mob.class,
+                    new org.bukkit.NamespacedKey(this, "smoke_look"));
+            java.util.function.Function<org.bukkit.entity.Mob, Mannequin> nearest = mob -> body;
+            java.util.function.Predicate<org.bukkit.entity.Player> noOne = player -> false;
+            @SuppressWarnings("unchecked")
+            var goal = (com.destroystokyo.paper.entity.ai.Goal<org.bukkit.entity.Mob>) goalConstructor.newInstance(
+                    key, looker, nearest, noOne);
+            boolean activates = false;
+            for (int attempt = 0; attempt < 2000 && !activates; attempt++) activates = goal.shouldActivate();
+            goal.start();
+            goal.tick();
+            boolean stays = goal.shouldStayActive();
+            getServer().getMobGoals().addGoal(looker, 8, goal);
+            boolean added = getServer().getMobGoals().hasGoal(looker, key);
+            body.remove();
+            expect(activates && stays && added, "A mob looks at the double now and then, like at an AFK player");
+        } finally {
+            watcher.remove();
+            looker.remove();
+            target.remove();
+        }
     }
 
     private void expect(boolean value, String message) {

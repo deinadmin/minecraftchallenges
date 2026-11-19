@@ -4,6 +4,7 @@ import de.carl.minecraftchallenges.MinecraftChallengesPlugin;
 import de.carl.minecraftchallenges.smp.SmpService;
 import de.carl.minecraftchallenges.util.LobbyService;
 import de.carl.minecraftchallenges.util.Messages;
+import de.carl.minecraftchallenges.util.TabListPackets;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -24,6 +25,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiPredicate;
+import java.util.logging.Level;
 
 /**
  * Separates the hub and every game lobby: players only see, hear and list players of their own
@@ -41,6 +44,10 @@ public final class LobbyIsolationService implements Listener {
     private final SmpService smp;
     // Read from the async chat thread, so it is a snapshot maintained on the main thread.
     private final Map<UUID, String> contexts = new ConcurrentHashMap<>();
+    /** (viewer, target): true hides the target from the viewer although both share a context. */
+    private BiPredicate<Player, Player> concealed = (viewer, target) -> false;
+    private final TabListPackets tabList;
+    private boolean tabListErrorLogged;
 
     public LobbyIsolationService(MinecraftChallengesPlugin plugin, LobbyService lobby,
                                  GameLobbyRegistry registry, SmpService smp) {
@@ -48,7 +55,25 @@ public final class LobbyIsolationService implements Listener {
         this.lobby = lobby;
         this.registry = registry;
         this.smp = smp;
+        TabListPackets packets;
+        try {
+            packets = new TabListPackets();
+        } catch (ReflectiveOperationException exception) {
+            plugin.getLogger().log(Level.WARNING, "Tab-Liste für unsichtbare Admins nicht verfügbar.", exception);
+            packets = null;
+        }
+        this.tabList = packets;
         plugin.getServer().getScheduler().runTaskTimer(plugin, this::resync, 40L, 40L);
+    }
+
+    /** Players the predicate conceals stay invisible to the viewer, but keep their tab-list entry. */
+    public void conceal(BiPredicate<Player, Player> concealed) {
+        this.concealed = concealed;
+    }
+
+    /** Re-evaluates who sees the player and whom the player sees, e.g. after spectating starts or ends. */
+    public void refreshVisibility(Player player) {
+        refresh(player);
     }
 
     public void refreshAll() {
@@ -70,15 +95,34 @@ public final class LobbyIsolationService implements Listener {
         for (Player other : plugin.getServer().getOnlinePlayers()) {
             if (other.equals(player)) continue;
             String otherContext = contexts.computeIfAbsent(other.getUniqueId(), ignored -> computeContext(other));
-            if (context.equals(otherContext)) {
-                player.showPlayer(plugin, other);
-                other.showPlayer(plugin, player);
-            } else {
-                player.hidePlayer(plugin, other);
-                other.hidePlayer(plugin, player);
-            }
+            boolean same = context.equals(otherContext);
+            apply(player, other, same);
+            apply(other, player, same);
         }
         plugin.getServer().getOnlinePlayers().forEach(this::updateTabHeader);
+    }
+
+    private void apply(Player viewer, Player target, boolean sameContext) {
+        if (!sameContext) {
+            viewer.hidePlayer(plugin, target);
+        } else if (!concealed.test(viewer, target)) {
+            viewer.showPlayer(plugin, target);
+        } else {
+            viewer.hidePlayer(plugin, target);
+            relist(viewer, target);
+        }
+    }
+
+    private void relist(Player viewer, Player target) {
+        if (tabList == null) return;
+        try {
+            tabList.relist(viewer, target);
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            if (!tabListErrorLogged) {
+                tabListErrorLogged = true;
+                plugin.getLogger().log(Level.WARNING, "Tab-Eintrag konnte nicht gesendet werden.", exception);
+            }
+        }
     }
 
     private String computeContext(Player player) {

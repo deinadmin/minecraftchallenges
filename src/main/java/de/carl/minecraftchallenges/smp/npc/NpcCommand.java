@@ -12,6 +12,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Stream;
@@ -140,13 +141,29 @@ public final class NpcCommand implements CommandExecutor, TabCompleter {
             info(player, "Es gibt noch keine SMP-NPCs. Quest-NPCs erscheinen, sobald Spieler ihre Bauwerke entdecken.");
             return;
         }
-        info(player, all.size() + " SMP-NPCs:");
-        for (SmpNpc npc : all) {
+        Location here = player.getLocation();
+        String world = here.getWorld() == null ? "" : here.getWorld().getName();
+        // Nearest first; NPCs in other worlds follow, grouped by world.
+        List<SmpNpc> sorted = all.stream().sorted(Comparator
+                .comparing((SmpNpc npc) -> !npc.world().equals(world))
+                .thenComparing(SmpNpc::world)
+                .thenComparingDouble(npc -> distanceSquared(npc, here))).toList();
+        info(player, all.size() + " SMP-NPCs (nächste zuerst):");
+        for (SmpNpc npc : sorted) {
             String extra = npc.trader()
                     ? "zieht weiter in " + SmpText.duration(Math.max(0, (npc.expiresAt() - System.currentTimeMillis()) / 60_000) * 60)
                     : npc.offers().size() + " Quests";
-            info(player, "• " + npc.title() + " · " + npc.world() + where(npc) + " · " + extra);
+            String distance = npc.world().equals(world)
+                    ? " · " + Math.round(Math.sqrt(distanceSquared(npc, here))) + " Blöcke" : "";
+            info(player, "• " + npc.title() + " · " + npc.world() + where(npc) + distance + " · " + extra);
         }
+    }
+
+    private static double distanceSquared(SmpNpc npc, Location here) {
+        double dx = npc.x() - here.getX();
+        double dy = npc.y() - here.getY();
+        double dz = npc.z() - here.getZ();
+        return dx * dx + dy * dy + dz * dz;
     }
 
     private static Stream<String> givers() {

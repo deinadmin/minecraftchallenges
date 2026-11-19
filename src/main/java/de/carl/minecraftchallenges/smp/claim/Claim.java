@@ -1,5 +1,6 @@
 package de.carl.minecraftchallenges.smp.claim;
 
+import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -13,6 +14,7 @@ public final class Claim {
     private final int x;
     private final int z;
     private final Set<UUID> trusted = new LinkedHashSet<>();
+    private final EnumSet<ClaimFlag> allowed = EnumSet.copyOf(ClaimFlag.defaults());
     private UUID owner;
     private int radius;
     private long invested;
@@ -34,6 +36,25 @@ public final class Claim {
     /** Coins paid for this plot so far; the basis of the refund. */
     public long invested() { return invested; }
     public Set<UUID> trusted() { return trusted; }
+
+    /** What strangers may do here, and which plot rules are on. */
+    public boolean allows(ClaimFlag flag) {
+        return allowed.contains(flag);
+    }
+
+    public Set<ClaimFlag> allowed() {
+        return java.util.Collections.unmodifiableSet(allowed);
+    }
+
+    void allow(ClaimFlag flag, boolean allow) {
+        if (allow) allowed.add(flag);
+        else allowed.remove(flag);
+    }
+
+    void resetFlags() {
+        allowed.clear();
+        allowed.addAll(ClaimFlag.defaults());
+    }
 
     public int minX() { return x - radius; }
     public int maxX() { return x + radius; }

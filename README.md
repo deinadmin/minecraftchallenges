@@ -12,7 +12,7 @@ Ein erweiterbares Challenge-Plugin für **Paper 26.3** (Minecraft 26.3, Java 25)
 - erste Challenge **„Mob-Jagd“**: fünf Minuten lang persönliche Zufalls-Mobs finden und töten
 - zehn häufige Ziel-Mobs, persönliche Bossbar und drei feste Skips pro Spieler
 - Admin-/Mod-Steuerung, Ready-Up mit 30-Sekunden-Vorbereitung und 10-Sekunden-Countdown
-- Rangformatierung für Admins, Mods und Spieler in Chat und Tab-Liste
+- Rangformatierung für Admins, Mods und Spieler in Chat, Tab-Liste und im Namensschild über dem Kopf
 - Admin-Steuerungsmenü zum Starten der Runde oder vollständigen Neugenerieren der Challenge-Welt
 - gespeicherte Zeitpresets für 5, 15 oder 30 Minuten sowie 1 oder 2 Stunden
 - 40-Blöcke-Warteradius, animierte Border-Öffnung beim Countdown und zufällige sichere Endpositionen
@@ -119,14 +119,22 @@ Das SMP ist ein eigener Spielmodus mit Coins. Alle Befehle sind englisch, alle T
 | `/shop shuffle` | Mischt die Tagesangebote sofort neu; der Wechsel um 0 Uhr bleibt. | `minecraftchallenges.command.shop` |
 | `/sell` | Verkaufs-GUI: Items hineinlegen, Erlös sehen, bestätigen. Nicht Verkauftes kommt beim Schließen zurück. | alle |
 | `/prices` | Aktuelle Verkaufskurse und die heute gesuchten Items. | alle |
+| `/buylevel <1-100>` | Zeigt den Preis für so viele Erfahrungslevel, gekauft wird erst über **Bestätigen** im Chat (gilt 60 Sekunden). | alle |
 | `/claim buy` | Kauft ein Grundstück (41×41 Blöcke) um die eigene Position, nach Vorschau und Bestätigung. | alle |
 | `/claim upgrade` | Vergrößert das Grundstück um 10 Blöcke Radius (bis Radius 80). | Besitzer |
 | `/claim trust\|untrust <Spieler>` | Erlaubt oder entzieht Bauen und Benutzen. | Besitzer |
+| `/claim permissions` | Öffnet die Rechte des Grundstücks: was Fremde dürfen, PvP und Monster-Spawns. Andere sehen sie nur an. | Besitzer, Admins |
 | `/claim sell <Spieler> <Preis>` · `/claim transfer <Spieler>` | Verkauft oder verschenkt das Grundstück; der Empfänger bestätigt mit `/claim accept`. | Besitzer |
 | `/claim info` · `list` · `border [toggle]` · `abandon` | Infos, eigene Grundstücke, Grenze anzeigen, aufgeben (50 % Erstattung). | alle |
 | `/claim delete` | Löscht das Grundstück, auf dem man steht, ohne Erstattung. | `minecraftchallenges.command.claim-admin` |
 | `/quest` · `/quest cancel` | Zeigt die laufende Quest oder bricht sie ab. | alle |
-| `/smpnpc trader\|quest <Typ>\|reroll\|remove\|list` | Setzt, würfelt neu, entfernt und listet SMP-NPCs. | `minecraftchallenges.command.smpnpc` |
+| `/smpnpc trader\|quest <Typ>\|reroll\|remove\|list` | Setzt, würfelt neu, entfernt und listet SMP-NPCs (`list` nach Entfernung, nächste zuerst). | `minecraftchallenges.command.smpnpc` |
+| `/afktoken <Dauer>` · `list` · `delete <ID>` | Hält den Chunk an der eigenen Position für die Dauer geladen (`90m`, `12h`, `3d`, `1d12h`; höchstens `smp.afk-tokens.max-days`), damit Eisenfarmen, Trichter, Öfen und Redstone ohne Spieler weiterlaufen. Ein zweiter Token im selben Chunk erneuert den alten. `list` sortiert nach Entfernung. | `minecraftchallenges.command.afktoken` (Admin) |
+| `/craftingtable` (`/ct`) | Öffnet überall im SMP eine Werkbank; Items im Raster kommen beim Schließen zurück. | alle |
+| `/ec [Spieler]` (`/enderchest`) | Öffnet die eigene Endertruhe überall im SMP. Admins öffnen mit Namen die SMP-Endertruhe eines anderen Spielers (live, sonst den gespeicherten Stand, auch offline). | alle · fremde: `minecraftchallenges.command.ec-others` (Admin) |
+| `/invsee <Spieler>` | Zeigt das SMP-Inventar eines Spielers: oben Inventar und Hotbar, unten Helm, Brustpanzer, Hose, Schuhe und Zweithand. Live, solange der Spieler im SMP-Survival ist, sonst der gespeicherte Stand (auch offline). | `minecraftchallenges.command.invsee` (Admin) |
+| `/pos <Spieler>` | Zeigt Welt und Koordinaten eines Spielers, mit den Knöpfen **Zuschauen** und **Teleportieren** (`/pos <Spieler> spectate\|teleport`). | `minecraftchallenges.command.pos` (Admin) |
+| `/spectate` | Startet das unsichtbare Zuschauen an der eigenen Position (ohne Teleport); erneut `/spectate` oder die Barriere bringt dich zurück. | `minecraftchallenges.command.spectate` (Admin) |
 
 **Markt.** Jedes verkaufbare Item hat in `plugins/MinecraftChallenges/smp-values.yml` einen Referenzwert und eine
 Markttiefe. `/sell` zahlt bei unberührtem Markt ein Sechstel des Werts; jeder Verkauf drückt den Kurs für alle, und
@@ -135,9 +143,41 @@ drucken also kein Geld. Täglich sind drei Items „gesucht“ und bringen pro S
 Doppelte. Kaufpreise liegen bei 85–125 % des Werts (Wanderhändler 70–85 %), Verkaufen zahlt nie mehr als die Hälfte
 des günstigsten Kaufpreises. Dieselbe Datei legt die Pools des Daily Shops fest. Änderungen greifen nach einem Neustart.
 
-**Grundstücke.** Quadratisch um die Kaufposition, über die volle Welthöhe, nur in der SMP-Oberwelt. Fremde können
-dort nur herumlaufen und kämpfen (PvP bleibt an); Explosionen, Feuer, Flüssigkeiten, Kolben, Werfer und Trichter
-wirken nicht über die Grenze. Grundstücke halten Abstand zum Spawn, zu fremden Grundstücken, zu Festungen mit
+**Level kaufen.** `/buylevel` bezahlt Level nach ihren XP-Punkten, wie Vanilla sie zählt: Level 0 → 30 sind 1.395
+Punkte, Level 30 → 40 schon 1.525. Ein Punkt kostet den Wert einer Erfahrungsflasche aus `smp-values.yml` geteilt
+durch ihre durchschnittlich 7 XP (bei 15 Coins also gut 2,14 Coins), Level 0 → 30 damit rund 3.000 Coins.
+Angefangener Fortschritt zum nächsten Level wird angerechnet. Jeder Kauf erhöht die Nachfrage für alle Spieler und
+damit den Preis, höchstens um 50 %; die Nachfrage halbiert sich alle 12 Stunden. Aufteilen in kleine Käufe spart
+nichts. Ist der Preis bis zum Klick auf **Bestätigen** gestiegen, kommt ein neues Angebot statt einer höheren
+Abbuchung. Einstellungen unter `smp.economy.buylevel` in der `config.yml`.
+
+**Fremde Inventare.** `/invsee` und `/ec <Spieler>` lassen sich nur bearbeiten, wenn der Admin selbst im
+SMP-Survival ist; aus der Lobby, im Bearbeitungsmodus oder beim unsichtbaren Zuschauen sind sie nur zum Ansehen, damit
+keine Items zwischen Kreativ, Challenges und SMP wandern. Eine Live-Ansicht gleicht jeden Tick ab und schreibt nur die
+Slots, die der Admin geändert hat. Wechselt der Spieler den Modus oder betritt er das SMP, schließt sich die Ansicht.
+
+**Unsichtbares Zuschauen.** `/spectate` (an der eigenen Position) oder `/pos <Spieler> spectate` (direkt beim Spieler) lässt an der Position des Admins eine Figur mit seinem
+Skin, Namen und seiner Ausrüstung zurück, die wie ein AFK-Spieler dasteht (bei Schlägen zuckt sie und wird
+zurückgestoßen). Der Admin selbst fliegt im Kreativmodus zum Spieler, für alle außer anderen Admins unsichtbar und
+bleibt in der Tab-Liste. Blöcke baut er lautlos und ohne Partikel ab, auch was darauf stand (Fackeln, Türhälften);
+gesetzte Blöcke hört niemand. Kisten öffnet er als Kopie ohne Deckel und Ton, Änderungen werden nur übernommen,
+wenn sich der Inhalt nicht inzwischen geändert hat. Mobs kann er schlagen, Spieler nicht; die eigene Figur zuckt
+nur und nimmt keinen Schaden. Türen, Falltüren und Zauntore öffnet er lautlos. Items benutzen, droppen und aufheben geht nicht, Knöpfe, Hebel
+und Sculk-Sensoren reagieren nicht auf ihn; Mobs und Dorfbewohner schauen ihn nicht an, folgen ihm nicht und fliehen
+nicht vor ihm, schauen aber ab und zu seine Figur an wie einen AFK-Spieler. XP-Kugeln fliegen zum nächsten echten Spieler statt zu
+ihm und sind für ihn selbst ausgeblendet, sonst würde sein eigener Client sie heranziehen. Die Figur trägt den
+Namen samt Rang wie das Namensschild eines Spielers. Rechtsklick auf die Barriere **Zuschauen verlassen** im letzten
+Hotbar-Platz bringt ihn an die Figur zurück, mit seinem Survival-Inventar und -Zustand. Gespeichert wird dabei immer
+der Survival-Stand; bei Logout, Verlassen des SMP oder Server-Stopp endet das Zuschauen automatisch.
+
+**Grundstücke.** Quadratisch um die Kaufposition, über die volle Welthöhe, nur in der SMP-Oberwelt. Besitzer und
+Vertraute dürfen dort alles, Fremde nur, was der Besitzer unter `/claim permissions` erlaubt. Das Menü hat eine Reihe
+pro Bereich (Bauen & Garten, Redstone, Behälter, Arbeitsblöcke, Tiere/Fahrzeuge/Items) mit 35 Schaltern, z. B.
+Ernten, Türen, Druckplatten, Truhen, Werkbank, Endertruhe, friedliche Mobs angreifen, handeln oder Enderperlen; ein
+Klick auf den farbigen Reihenkopf schaltet die ganze Reihe. Unten liegen die Grundstücksregeln PvP und Monster-Spawns,
+die für alle gelten. Standardmäßig dürfen Fremde Werkbank, Endertruhe, Boote/Loren, Items aufheben und Enderperlen;
+PvP und Monster sind an. Monster darf jeder immer bekämpfen. Bei Verkauf oder Übergabe gelten wieder die Standards.
+Explosionen, Feuer, Flüssigkeiten, Kolben, Werfer und Trichter wirken nicht über die Grenze. Grundstücke halten Abstand zum Spawn, zu fremden Grundstücken, zu Festungen mit
 Endportal und zu Quest-NPCs. Die Grenze erscheint als farbige Partikellinie, nur für den Spieler in der Nähe
 (grün = eigenes, blau = vertraut, rot = fremd). Preise, Größen und Abstände stehen unter `smp.claims` in `config.yml`.
 

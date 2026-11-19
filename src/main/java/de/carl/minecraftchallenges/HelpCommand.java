@@ -5,7 +5,9 @@ import de.carl.minecraftchallenges.rank.RankService;
 import de.carl.minecraftchallenges.smp.BackupCommand;
 import de.carl.minecraftchallenges.smp.SmpCommands;
 import de.carl.minecraftchallenges.smp.SmpService;
+import de.carl.minecraftchallenges.smp.afk.AfkTokenCommand;
 import de.carl.minecraftchallenges.smp.shop.ShopMenu;
+import de.carl.minecraftchallenges.smp.spectate.PositionCommand;
 import de.carl.minecraftchallenges.util.LobbyService;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
@@ -100,6 +102,8 @@ public final class HelpCommand implements CommandExecutor, Listener {
                             : "Beendet alle laufenden Challenges");
             add(entries, sender, true, KeepAliveCommand.PERMISSION, true,
                     "/keepalive", "Hält die laufende Runde offen, auch wenn alle Spieler gehen");
+            add(entries, sender, true, RenderDistanceCommand.PERMISSION, true,
+                    "/renderdistance <2-32|reset> [@p|@a|Spieler]", "Ändert die Render-Distanz (Mods nur für sich)");
         }
         add(entries, sender, false, "minecraftchallenges.command.reload", true,
                 "/challenge reload", "Lädt die Konfiguration neu");
@@ -112,6 +116,8 @@ public final class HelpCommand implements CommandExecutor, Listener {
                 "/lobby", "Bringt dich zurück in die Lobby (/hub, /l)");
         add(entries, sender, false, null, false, "/help", "Zeigt diese Hilfe");
         add(entries, sender, true, null, false, "/spawn", "Teleportiert dich nach 3 Sekunden zum SMP-Spawn");
+        add(entries, sender, true, RenderDistanceCommand.PERMISSION, true,
+                "/renderdistance <2-32|reset> [@p|@a|Spieler]", "Ändert die Render-Distanz (Mods nur für sich)");
         add(entries, sender, true, null, false, "/sethome", "Setzt dein Zuhause an deiner Position");
         add(entries, sender, true, null, false, "/home", "Teleportiert dich zu deinem Zuhause");
         add(entries, sender, true, null, false, "/tpa <Spieler>", "Fragt, ob du dich zu einem Spieler teleportieren darfst");
@@ -125,20 +131,33 @@ public final class HelpCommand implements CommandExecutor, Listener {
         }
         add(entries, sender, true, null, false, "/prices", "Zeigt die Marktpreise und heute gesuchte Items");
         if (!editing) {
+            add(entries, sender, true, null, false, "/buylevel <1-100>", "Kauft Erfahrungslevel für Coins");
+        }
+        if (!editing) {
         }
         add(entries, sender, true, null, false, "/claim", "Grundstücke: kaufen, vergrößern, Freunden vertrauen");
+        add(entries, sender, true, null, false, "/claim permissions", "Einstellen, was Fremde auf deinem Grundstück dürfen");
         add(entries, sender, true, null, false, "/quest", "Zeigt deine laufende Quest; /quest cancel bricht sie ab");
         add(entries, sender, true, null, false, "/ec", "Öffnet deine Endertruhe von überall im SMP");
+        add(entries, sender, true, null, false, "/craftingtable", "Öffnet überall eine Werkbank (/ct)");
         add(entries, sender, true, SmpCommands.EC_OTHERS_PERMISSION, true,
                 "/ec <Spieler>", "Öffnet die SMP-Endertruhe eines Spielers (auch offline)");
+        add(entries, sender, true, SmpCommands.INVSEE_PERMISSION, true,
+                "/invsee <Spieler>", "Öffnet das SMP-Inventar eines Spielers samt Rüstung (auch offline)");
         add(entries, sender, true, "minecraftchallenges.command.edit", true,
                 "/edit", "Kreativ-Bearbeitungsmodus im SMP mit eigenem Inventar");
+        add(entries, sender, false, PositionCommand.PERMISSION, true,
+                "/pos <Spieler>", "Zeigt die Position; Knöpfe zum unsichtbaren Zuschauen und Teleportieren");
+        add(entries, sender, true, "minecraftchallenges.command.spectate", true,
+                "/spectate", "Unsichtbar zuschauen, wo du stehst; nochmal /spectate bringt dich zurück");
         add(entries, sender, true, ShopMenu.SHUFFLE_PERMISSION, true,
                 "/shop shuffle", "Mischt die Tagesangebote sofort neu");
         add(entries, sender, true, "minecraftchallenges.command.claim-admin", true,
                 "/claim delete", "Löscht das Grundstück, auf dem du stehst");
         add(entries, sender, true, "minecraftchallenges.command.smpnpc", true,
                 "/smpnpc", "Wanderhändler und Quest-NPCs setzen, neu auswürfeln, entfernen");
+        add(entries, sender, true, AfkTokenCommand.PERMISSION, true,
+                "/afktoken <Dauer>", "Hält deinen Chunk geladen, z. B. für Eisenfarmen (list, delete <ID>)");
         add(entries, sender, true, SmpCommands.SETSPAWN_PERMISSION, true,
                 "/setspawn", "Setzt den SMP-Spawn; der Spawnschutz wandert mit");
         if (sender.hasPermission(BackupCommand.PERMISSION)) {

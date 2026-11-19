@@ -123,6 +123,16 @@ val performancePolicyTest = tasks.register<JavaExec>("performancePolicyTest") {
 }
 tasks.check { dependsOn(performancePolicyTest) }
 
+val renderDistanceWatchdogTest = tasks.register<JavaExec>("renderDistanceWatchdogTest") {
+    group = "verification"
+    description = "Checks the lag watchdog that resets render distance overrides."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.util.RenderDistanceWatchdogTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(renderDistanceWatchdogTest) }
+
 val economyTest = tasks.register<JavaExec>("economyTest") {
     group = "verification"
     description = "Checks the sell market curve, the shipped value list and the daily shop rotation."
@@ -152,6 +162,16 @@ val chunkSetTest = tasks.register<JavaExec>("chunkSetTest") {
     javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
 }
 tasks.check { dependsOn(chunkSetTest) }
+
+val afkDurationTest = tasks.register<JavaExec>("afkDurationTest") {
+    group = "verification"
+    description = "Checks duration parsing and formatting for /afktoken."
+    dependsOn(npcTest.classesTaskName)
+    classpath = npcTest.runtimeClasspath
+    mainClass.set("de.carl.minecraftchallenges.smp.AfkDurationTest")
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+tasks.check { dependsOn(afkDurationTest) }
 
 // Opt-in only: this plugin creates disposable worlds and stops its test server when finished.
 tasks.register<Jar>("performanceSmokeJar") {

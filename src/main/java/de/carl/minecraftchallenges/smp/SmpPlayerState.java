@@ -75,6 +75,12 @@ public record SmpPlayerState(
                 fallDistance, potionEffects, location, respawnLocation);
     }
 
+    public SmpPlayerState withInventory(ItemStack[] contents) {
+        return new SmpPlayerState(contents, enderChest, heldSlot, health, absorption, foodLevel, saturation,
+                exhaustion, level, experienceProgress, totalExperience, remainingAir, fireTicks, freezeTicks,
+                fallDistance, potionEffects, location, respawnLocation);
+    }
+
     /** Applies everything except the position; the caller has already teleported the player. */
     public void apply(Player player) {
         player.getInventory().clear();
